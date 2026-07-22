@@ -46,9 +46,10 @@ class SpikeDetectorBase:
         self.cfg.validate()
         self._bars: List[Bar] = []
         self._trs: List[float] = []
+        self._ema: Optional[float] = None
 
     def _append_bar(self, bar: Bar) -> int:
-        """Track the bar and its true range; returns the bar index."""
+        """Track the bar, its true range and the trend EMA; returns the index."""
         self._bars.append(bar)
         idx = len(self._bars) - 1
         if idx == 0:
@@ -58,7 +59,18 @@ class SpikeDetectorBase:
             self._trs.append(
                 max(bar.high - bar.low, abs(bar.high - prev_close), abs(bar.low - prev_close))
             )
+        if self.cfg.trend_ema_len > 0:
+            if self._ema is None:
+                self._ema = bar.close
+            else:
+                alpha = 2.0 / (self.cfg.trend_ema_len + 1)
+                self._ema += alpha * (bar.close - self._ema)
         return idx
+
+    def _trend_ok(self, direction: Direction, bar: Bar) -> bool:
+        if self.cfg.trend_ema_len <= 0 or self._ema is None:
+            return True
+        return bar.close > self._ema if direction is Direction.LONG else bar.close < self._ema
 
     # ------------------------------------------------------------------ utils
 
@@ -151,6 +163,8 @@ class SpikeDetectorBase:
         for direction in (Direction.LONG, Direction.SHORT):
             start = self._find_spike_run(idx, direction)
             if start is None:
+                continue
+            if not self._trend_ok(direction, self._bars[idx]):
                 continue
             if not self._has_gap(start, idx, direction):
                 continue
@@ -253,17 +267,30 @@ class SP2LStrategy(SpikeDetectorBase):
                 self.state = State.PULLBACK
                 self.setup.in_pullback = True
                 self.setup.pullback_start_idx = idx
+                self.setup.pullback_extreme = (
+                    bar.low if self.setup.direction is Direction.LONG else bar.high
+                )
 
-        # Entry only on bars strictly after the pullback started (the intrabar
-        # order of a bar that both corrects and breaks out is unknowable).
-        if self.state is State.PULLBACK and idx > self.setup.pullback_start_idx:
-            signal = self._breakout_signal(idx)
-            if signal is not None:
-                if self._in_session(bar):
-                    self._reset()
-                    return signal
-                self._reset()  # triggered outside session: setup consumed
-                return None
+        if self.state is State.PULLBACK:
+            s = self.setup
+            if s.direction is Direction.LONG:
+                s.pullback_extreme = min(s.pullback_extreme, bar.low)
+            else:
+                s.pullback_extreme = max(s.pullback_extreme, bar.high)
+            # Entry only after the pullback matured (the intrabar order of a
+            # bar that both corrects and breaks out is unknowable).
+            if idx >= s.pullback_start_idx + self.cfg.min_pullback_bars:
+                signal = self._breakout_signal(idx)
+                if signal is not None:
+                    depth_ok = True
+                    if self.cfg.min_retrace > 0 and s.spike_len > 0:
+                        depth = abs(s.point_b - s.pullback_extreme) / s.spike_len
+                        depth_ok = depth >= self.cfg.min_retrace
+                    in_session = self._in_session(bar)
+                    self._reset()  # the breakout consumes the setup either way
+                    if depth_ok and in_session:
+                        return signal
+                    return None
 
         if self.state is State.IDLE:
             setup = self._detect_spike(idx)

@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from .btb import BTBStrategy
 from .models import Bar, Config, Direction, Trade
-from .strategy import SP2LStrategy
+from .strategy import SP2LStrategy, true_ranges
 
 STRATEGY_REGISTRY = {"sp2l": SP2LStrategy, "btb": BTBStrategy}
 
@@ -153,20 +153,43 @@ class Backtester:
         equity_curve: List[float] = []
         open_trade: Optional[Trade] = None
 
+        # Rolling ATR for the trailing stop.
+        trs = true_ranges(bars)
+        atr: List[float] = []
+        for i in range(len(trs)):
+            window = trs[max(0, i - cfg.atr_len + 1) : i + 1]
+            atr.append(sum(window) / len(window))
+
+        # Daily risk-guard state.
+        cur_day = None
+        day_r = 0.0
+        day_trades = 0
+
         for idx, bar in enumerate(bars):
+            if bar.ts.date() != cur_day:
+                cur_day = bar.ts.date()
+                day_r = 0.0
+                day_trades = 0
+
             # Manage the open position first (exits before new entries).
             if open_trade is not None:
                 self._maybe_scale_in(open_trade, bar)
-                exited = self._check_exit(open_trade, bar, idx)
+                exited = self._check_exit(open_trade, bar, idx, atr_val=atr[idx])
                 if exited:
                     equity += open_trade.pnl
+                    day_r += open_trade.r_multiple
                     open_trade = None
 
             # Every strategy sees every bar so their states stay current.
             signals = [s for s in (st.on_bar(bar) for st in strategies) if s]
             signal = signals[0] if signals else None
 
-            if signal is not None and open_trade is None:
+            guard_blocked = (
+                (cfg.max_trades_per_day > 0 and day_trades >= cfg.max_trades_per_day)
+                or (cfg.max_daily_loss_r > 0 and day_r <= -cfg.max_daily_loss_r)
+            )
+
+            if signal is not None and open_trade is None and not guard_blocked:
                 risk_amount = equity * cfg.risk_per_trade
                 per_unit = abs(signal.entry - signal.stop)
                 if per_unit > 0:
@@ -185,11 +208,13 @@ class Backtester:
                         trade.scale_in_price = signal.entry - half
                     trades.append(trade)
                     open_trade = trade
+                    day_trades += 1
                     # The signal bar itself may already reach SL or TP;
                     # partial/BE management starts on the next bar.
                     exited = self._check_exit(open_trade, bar, idx, manage=False)
                     if exited:
                         equity += open_trade.pnl
+                        day_r += open_trade.r_multiple
                         open_trade = None
 
             equity_curve.append(equity)
@@ -218,7 +243,14 @@ class Backtester:
             trade.size *= 2
             trade.scaled_in = True
 
-    def _check_exit(self, trade: Trade, bar: Bar, idx: int, manage: bool = True) -> bool:
+    def _check_exit(
+        self,
+        trade: Trade,
+        bar: Bar,
+        idx: int,
+        manage: bool = True,
+        atr_val: Optional[float] = None,
+    ) -> bool:
         cfg = self.config
         sign = 1 if trade.direction is Direction.LONG else -1
         risk = trade.risk_per_unit
@@ -229,7 +261,12 @@ class Backtester:
         # Conservative: the stop is always checked first.
         if touched(trade.stop, from_below=trade.direction is Direction.SHORT):
             stop_recovers = sign * (trade.stop - trade.entry) >= 0
-            reason = "be-stop" if trade.be_done and stop_recovers else "stop"
+            if trade.trailed and stop_recovers:
+                reason = "trail-stop"
+            elif trade.be_done and stop_recovers:
+                reason = "be-stop"
+            else:
+                reason = "stop"
             self._close(trade, idx, bar, trade.stop, reason)
             return True
 
@@ -247,6 +284,15 @@ class Backtester:
                 trigger = trade.entry + sign * cfg.be_trigger_rr * risk
                 if touched(trigger, from_below=trade.direction is Direction.LONG):
                     self._move_to_breakeven(trade, sign, risk)
+            # ATR trailing stop: only ever tightens; takes effect next bar.
+            if cfg.trail_atr_mult > 0 and atr_val is not None and atr_val > 0:
+                candidate = bar.close - sign * cfg.trail_atr_mult * atr_val
+                tightened = (
+                    max(trade.stop, candidate) if sign > 0 else min(trade.stop, candidate)
+                )
+                if tightened != trade.stop:
+                    trade.stop = tightened
+                    trade.trailed = True
 
         if touched(trade.target, from_below=trade.direction is Direction.LONG):
             self._close(trade, idx, bar, trade.target, "target")
@@ -267,3 +313,5 @@ class Backtester:
         sign = 1 if trade.direction is Direction.LONG else -1
         remaining = 1.0 - self.config.partial_pct if trade.partial_done else 1.0
         trade.pnl = trade.realized_pnl + sign * (price - trade.entry) * trade.size * remaining
+        # Round-trip cost, expressed in R.
+        trade.pnl -= self.config.cost_r * trade.risk_per_unit * trade.size

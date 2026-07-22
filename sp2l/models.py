@@ -78,6 +78,26 @@ class Config:
     be_trigger_rr: float = 1.0
     be_offset_r: float = 0.0
 
+    # ATR trailing stop (0 = off). Trails at close -/+ mult * ATR, only ever
+    # tightening the stop.
+    trail_atr_mult: float = 0.0
+
+    # Trend filter: only long above / short below an EMA of closes (0 = off).
+    trend_ema_len: int = 0
+
+    # SP2L pullback quality: minimum bars between pullback start and breakout,
+    # and minimum pullback depth as a fraction of the spike (0 = off).
+    min_pullback_bars: int = 1
+    min_retrace: float = 0.0
+
+    # Round-trip trading cost per trade, in R (spread + commission).
+    cost_r: float = 0.0
+
+    # Daily risk guard: block new entries after this many trades per day or
+    # once the day's net R hits -max_daily_loss_r (0 = off).
+    max_trades_per_day: int = 0
+    max_daily_loss_r: float = 0.0
+
     # Session filter (UTC)
     session_filter: bool = False
     session_start: time = time(13, 30)
@@ -113,6 +133,12 @@ class Config:
             raise ValueError("partial_pct must be in (0, 1)")
         if self.be_mode not in ("off", "rr", "after_partial"):
             raise ValueError("be_mode must be off, rr or after_partial")
+        for name in ("trail_atr_mult", "trend_ema_len", "min_retrace", "cost_r",
+                     "max_trades_per_day", "max_daily_loss_r"):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be >= 0")
+        if self.min_pullback_bars < 1:
+            raise ValueError("min_pullback_bars must be >= 1")
         unknown = set(self.enabled_setups) - {"sp2l", "btb"}
         if unknown:
             raise ValueError(f"unknown setups: {sorted(unknown)}")
@@ -130,6 +156,7 @@ class Setup:
     created_idx: int
     in_pullback: bool = False
     pullback_start_idx: Optional[int] = None
+    pullback_extreme: Optional[float] = None  # deepest pullback price so far
     level: Optional[float] = None  # BTB: the broken key level (retest target)
 
     @property
@@ -154,6 +181,7 @@ class Trade:
     scaled_in: bool = False
     partial_done: bool = False
     be_done: bool = False
+    trailed: bool = False
     realized_pnl: float = 0.0  # banked by the partial exit
     exit_idx: Optional[int] = None
     exit_ts: Optional[datetime] = None

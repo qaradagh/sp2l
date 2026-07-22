@@ -1,9 +1,14 @@
 //@version=5
-// Pro BTB (Professional Back To Breakeven) indicator, after Mohammad Ali
-// Poursamadi. Mirrors the Python implementation in sp2l/btb.py:
-//   spike (same engine as SP2L) breaks a key level L (prior-range extreme,
-//   A < L < B) -> price retests L -> limit entry at L, SL behind the spike
-//   origin (A), TP at btbRr * risk (default 2R).
+// Pro BTB (Professional Back To Breakeven) indicator v2, after Mohammad Ali
+// Poursamadi. Mirrors the Python implementation in sp2l/btb.py + backtest.py.
+//
+// v2 adds full on-chart trade simulation and reporting:
+//   - live entry / SL / partial-TP / final-TP lines while a trade is open
+//   - partial take-profit, breakeven (risk-free) and ATR trailing stop
+//   - EMA trend filter, per-trade cost in R, daily risk guard
+//   - setup fate labels: expired / gapped / skipped / off-session / limit
+//   - outcome labels in R on every closed trade
+//   - dashboard: daily net R + recent trade list
 indicator("Pro BTB Poursamadi [Indicator]", "ProBTB", overlay = true,
      max_lines_count = 500, max_labels_count = 500, max_boxes_count = 500)
 
@@ -19,19 +24,39 @@ atrLen        = input.int(14,    "ATR length", minval = 1, group = grpDet)
 
 grpBtb = "BTB setup"
 lvlLookback = input.int(10,    "Level lookback (bars before spike)", minval = 1, group = grpBtb)
-btbRr       = input.float(2.0, "Risk : Reward", minval = 0.1, step = 0.1, group = grpBtb)
+btbRr       = input.float(2.0, "Final target (R:R)", minval = 0.1, step = 0.1, group = grpBtb)
 maxWaitBars = input.int(30,    "Max bars to wait for retest", minval = 1, group = grpBtb)
 slBufferPct = input.float(0.0, "SL buffer (fraction of spike)", minval = 0.0, maxval = 0.5, step = 0.05, group = grpBtb)
 useSession  = input.bool(false, "Session filter", group = grpBtb)
 sess        = input.session("1330-2000", "Session (exchange tz)", group = grpBtb)
 
+grpMgmt = "Trade management"
+usePartial = input.bool(false, "Partial take-profit", group = grpMgmt)
+partialRR  = input.float(1.0,  "Partial level (R)", minval = 0.1, step = 0.1, group = grpMgmt)
+partialPct = input.float(50.0, "Partial size (%)", minval = 1.0, maxval = 99.0, step = 5.0, group = grpMgmt)
+beMode     = input.string("Off", "Breakeven (risk-free)", options = ["Off", "At RR trigger", "After partial"], group = grpMgmt)
+beTrigRR   = input.float(1.0,  "BE trigger (R)", minval = 0.1, step = 0.1, group = grpMgmt)
+beOffsetR  = input.float(0.0,  "BE offset (R locked)", minval = -1.0, maxval = 1.0, step = 0.05, group = grpMgmt)
+
+grpFlt = "Filters & risk guards"
+emaLen       = input.int(0,     "Trend EMA length (0 = off)", minval = 0, group = grpFlt)
+trailMult    = input.float(0.0, "ATR trailing stop (x ATR, 0 = off)", minval = 0.0, step = 0.5, group = grpFlt)
+costR        = input.float(0.0, "Cost per trade (R)", minval = 0.0, step = 0.01, group = grpFlt)
+maxTradesDay = input.int(0,     "Max trades per day (0 = off)", minval = 0, group = grpFlt)
+maxLossDayR  = input.float(0.0, "Max daily loss (R, 0 = off)", minval = 0.0, step = 0.5, group = grpFlt)
+
 grpVis = "Display"
 showLevel  = input.bool(true, "Show broken level (L)", group = grpVis)
 showSpike  = input.bool(true, "Highlight spike zone", group = grpVis)
-showTrade  = input.bool(true, "Show entry/SL/TP on signal", group = grpVis)
+showFate   = input.bool(true, "Label expired/gapped/skipped setups", group = grpVis)
 showTable  = input.bool(true, "Show status table", group = grpVis)
 bullColor  = input.color(color.teal,   "Bull", inline = "c", group = grpVis)
 bearColor  = input.color(color.maroon, "Bear", inline = "c", group = grpVis)
+
+grpDash = "Dashboard"
+showDash = input.bool(true, "Show dashboard", group = grpDash)
+dashDays = input.int(5,  "Days shown", minval = 1, maxval = 15, group = grpDash)
+dashList = input.int(8,  "Recent trades shown", minval = 1, maxval = 20, group = grpDash)
 
 // ---------------------------------------------------------------- helpers
 rng        = high - low
@@ -41,10 +66,19 @@ strongBull = close > open and bodyRatio >= minBodyRatio and not isDoji
 strongBear = close < open and bodyRatio >= minBodyRatio and not isDoji
 atrVal     = ta.atr(atrLen)
 inSession  = not useSession or not na(time(timeframe.period, sess))
+emaVal     = ta.ema(close, math.max(emaLen, 1))
+trendOkLong  = emaLen == 0 or close > emaVal
+trendOkShort = emaLen == 0 or close < emaVal
 
 sbN = strongBull ? 1 : 0
 ssN = strongBear ? 1 : 0
 djN = isDoji ? 1 : 0
+
+pad2(int v) =>
+    v < 10 ? "0" + str.tostring(v) : str.tostring(v)
+
+fmtR(float r) =>
+    (r >= 0 ? "+" : "") + str.tostring(r, "0.00") + "R"
 
 countRun(simple bool bullish) =>
     int run = 0
@@ -93,7 +127,6 @@ detectSpike(simple bool bullish) =>
             pB := bullish ? high : low
     [ok, pA, pB, run]
 
-// Broken level: prior-range extreme in the lookback window before the run.
 findLevel(int run, simple bool bullish) =>
     float lvl = na
     for k = run to run + lvlLookback - 1
@@ -107,7 +140,52 @@ findLevel(int run, simple bool bullish) =>
 lvlBull = findLevel(runBull, true)
 lvlBear = findLevel(runBear, false)
 
+// ---------------------------------------------------------------- journal
+var tTimes = array.new_int()
+var tDirs  = array.new_int()
+var tRs    = array.new_float()
+var dayIds = array.new_int()
+var dayRs  = array.new_float()
+var dayNs  = array.new_int()
+var dayWs  = array.new_int()
+
+logTrade(int t, int d, float r) =>
+    array.push(tTimes, t)
+    array.push(tDirs, d)
+    array.push(tRs, r)
+    if array.size(tTimes) > 150
+        array.shift(tTimes)
+        array.shift(tDirs)
+        array.shift(tRs)
+    int dayid = year(t) * 10000 + month(t) * 100 + dayofmonth(t)
+    int n = array.size(dayIds)
+    if n > 0 and array.get(dayIds, n - 1) == dayid
+        array.set(dayRs, n - 1, array.get(dayRs, n - 1) + r)
+        array.set(dayNs, n - 1, array.get(dayNs, n - 1) + 1)
+        array.set(dayWs, n - 1, array.get(dayWs, n - 1) + (r > 0 ? 1 : 0))
+    else
+        array.push(dayIds, dayid)
+        array.push(dayRs, r)
+        array.push(dayNs, 1)
+        array.push(dayWs, r > 0 ? 1 : 0)
+        if array.size(dayIds) > 60
+            array.shift(dayIds)
+            array.shift(dayRs)
+            array.shift(dayNs)
+            array.shift(dayWs)
+
+todayStats() =>
+    int dayid = year(time) * 10000 + month(time) * 100 + dayofmonth(time)
+    int n = 0
+    float r = 0.0
+    int sz = array.size(dayIds)
+    if sz > 0 and array.get(dayIds, sz - 1) == dayid
+        n := array.get(dayNs, sz - 1)
+        r := array.get(dayRs, sz - 1)
+    [n, r]
+
 // ---------------------------------------------------------------- state
+// Setup state.
 var int   dir      = 0      // 0 idle, 1 long setup, -1 short setup
 var float pointA   = na     // spike origin (SL anchor)
 var float pointB   = na     // spike extreme
@@ -117,23 +195,123 @@ var line  lnL = na
 var line  lnA = na
 var box   spikeBox = na
 
-bool  longFire  = false
-bool  shortFire = false
-float sigEntry  = na
-float sigSL     = na
-float sigTP     = na
+// Open-trade state.
+var int   tDir      = 0
+var float tEntry    = na
+var float tSL       = na
+var float tInitSL   = na
+var float tTP1      = na
+var float tTP2      = na
+var int   tEntryBar = na
+var bool  tPartial  = false
+var bool  tBE       = false
+var bool  tTrail    = false
+var float tRealR    = 0.0
 
-// --- expiry
+bool longFire      = false
+bool shortFire     = false
+bool closedThisBar = false
+bool partialThisBar = false
+
+[todayN, todayR] = todayStats()
+bool guardBlocked = (maxTradesDay > 0 and todayN >= maxTradesDay) or
+     (maxLossDayR > 0 and todayR <= -maxLossDayR)
+
+// ------------------------------------------- 1) manage the open trade first
+bool  closeNow = false
+float closePx  = na
+float closeR   = na
+string closeTag = ""
+
+if tDir != 0 and bar_index > tEntryBar
+    float Ru = math.abs(tEntry - tInitSL)
+    bool slHit = tDir == 1 ? low <= tSL : high >= tSL
+    if slHit
+        float rem = tPartial ? 1.0 - partialPct / 100.0 : 1.0
+        float slR = (tDir == 1 ? tSL - tEntry : tEntry - tSL) / Ru
+        closeNow := true
+        closePx := tSL
+        closeR := tRealR + slR * rem - costR
+        closeTag := slR >= 0 ? (tTrail ? "TRL" : "BE") : "SL"
+    else
+        if usePartial and not tPartial
+            bool p1 = tDir == 1 ? high >= tTP1 : low <= tTP1
+            if p1
+                tRealR := tRealR + partialRR * partialPct / 100.0
+                tPartial := true
+                partialThisBar := true
+                if beMode == "After partial" and not tBE
+                    float ns = tEntry + (tDir == 1 ? 1 : -1) * beOffsetR * Ru
+                    tSL := tDir == 1 ? math.max(tSL, ns) : math.min(tSL, ns)
+                    tBE := true
+        if beMode == "At RR trigger" and not tBE
+            bool trg = tDir == 1 ? high >= tEntry + beTrigRR * Ru : low <= tEntry - beTrigRR * Ru
+            if trg
+                float ns = tEntry + (tDir == 1 ? 1 : -1) * beOffsetR * Ru
+                tSL := tDir == 1 ? math.max(tSL, ns) : math.min(tSL, ns)
+                tBE := true
+        if trailMult > 0 and not na(atrVal)
+            float tc = tDir == 1 ? close - trailMult * atrVal : close + trailMult * atrVal
+            float ns2 = tDir == 1 ? math.max(tSL, tc) : math.min(tSL, tc)
+            if ns2 != tSL
+                tSL := ns2
+                tTrail := true
+        bool tpHit = tDir == 1 ? high >= tTP2 : low <= tTP2
+        if tpHit
+            float rem = tPartial ? 1.0 - partialPct / 100.0 : 1.0
+            closeNow := true
+            closePx := tTP2
+            closeR := tRealR + btbRr * rem - costR
+            closeTag := "TP"
+
+// Trade drawing objects (declared after the management block; the line
+// updates for open trades happen in the block below).
+var line eLn  = na
+var line sLn  = na
+var line t1Ln = na
+var line t2Ln = na
+
+if tDir != 0 and bar_index > tEntryBar and not closeNow and not na(sLn)
+    line.set_y1(sLn, tSL)
+    line.set_y2(sLn, tSL)
+    if tBE or tTrail
+        line.set_color(sLn, color.blue)
+    if partialThisBar and not na(t1Ln)
+        line.set_color(t1Ln, color.new(color.green, 70))
+        line.set_x2(t1Ln, bar_index)
+
+if closeNow
+    if not na(eLn)
+        line.set_x2(eLn, bar_index)
+        line.set_x2(sLn, bar_index)
+        line.set_x2(t2Ln, bar_index)
+        if not na(t1Ln)
+            line.set_x2(t1Ln, math.min(line.get_x2(t1Ln), bar_index))
+    color oc = closeTag == "TP" ? (tDir == 1 ? bullColor : bearColor) : closeTag == "SL" ? color.red : color.blue
+    label.new(bar_index, closePx, closeTag + " " + fmtR(closeR),
+         style = tDir == 1 ? label.style_label_down : label.style_label_up,
+         color = color.new(oc, 20), textcolor = color.white, size = size.small)
+    logTrade(time, tDir, closeR)
+    closedThisBar := true
+    tDir := 0
+    eLn := na
+    sLn := na
+    t1Ln := na
+    t2Ln := na
+
+// ------------------------------------------- 2) setup lifecycle
 if dir != 0 and bar_index - spikeEnd > maxWaitBars
     if not na(lnL)
         line.set_color(lnL, color.new(color.gray, 70))
         line.set_color(lnA, color.new(color.gray, 70))
+    if showFate
+        label.new(bar_index, level, "✖ Expired", style = label.style_label_left,
+             color = color.new(color.gray, 60), textcolor = color.white, size = size.tiny)
     dir := 0
     lnL := na
     lnA := na
     spikeBox := na
 
-// --- spike extension (contiguous strong candle only); L and A stay put
 if dir != 0 and bar_index == spikeEnd + 1 and (dir == 1 ? strongBull : strongBear)
     spikeEnd := bar_index
     pointB := dir == 1 ? high : low
@@ -143,25 +321,33 @@ if dir != 0 and bar_index == spikeEnd + 1 and (dir == 1 ? strongBull : strongBea
             box.set_top(spikeBox, math.max(box.get_top(spikeBox), pointB))
         else
             box.set_bottom(spikeBox, math.min(box.get_bottom(spikeBox), pointB))
-
-// --- retest of the broken level -> limit entry at L
 else if dir != 0 and bar_index > spikeEnd
-    bool touched = dir == 1 ? low <= level : high >= level
-    if touched
+    bool touchedL = dir == 1 ? low <= level : high >= level
+    if touchedL
         float spLen = math.abs(pointB - pointA)
         float buffer = spLen * slBufferPct
         float stopPx = dir == 1 ? pointA - buffer : pointA + buffer
         bool gapped = dir == 1 ? open <= stopPx : open >= stopPx
-        if not gapped and inSession
+        if gapped
+            if showFate
+                label.new(bar_index, level, "✖ Gapped through", style = label.style_label_left,
+                     color = color.new(color.gray, 60), textcolor = color.white, size = size.tiny)
+        else if not inSession
+            if showFate
+                label.new(bar_index, level, "◌ Off-session", style = label.style_label_left,
+                     color = color.new(color.gray, 60), textcolor = color.white, size = size.tiny)
+        else if tDir != 0
+            if showFate
+                label.new(bar_index, level, "◌ Skipped (in trade)", style = label.style_label_left,
+                     color = color.new(color.gray, 60), textcolor = color.white, size = size.tiny)
+        else if guardBlocked
+            if showFate
+                label.new(bar_index, level, "◌ Daily limit", style = label.style_label_left,
+                     color = color.new(color.gray, 60), textcolor = color.white, size = size.tiny)
+        else
             if dir == 1
-                sigEntry := math.min(level, open)
-                sigSL := stopPx
-                sigTP := sigEntry + btbRr * (sigEntry - sigSL)
                 longFire := true
             else
-                sigEntry := math.max(level, open)
-                sigSL := stopPx
-                sigTP := sigEntry - btbRr * (sigSL - sigEntry)
                 shortFire := true
         if not na(lnL)
             line.set_x2(lnL, bar_index)
@@ -171,9 +357,9 @@ else if dir != 0 and bar_index > spikeEnd
         lnA := na
         spikeBox := na
 
-// --- adopt a freshly detected spike whose level qualifies (A < L < B)
-bool newBull = okBull and not na(lvlBull) and lvlBull > aBull and lvlBull < bBull
-bool newBear = okBear and not na(lvlBear) and lvlBear < aBear and lvlBear > bBear
+// ------------------------------------------- 3) adopt a fresh spike when idle
+bool newBull = okBull and not na(lvlBull) and lvlBull > aBull and lvlBull < bBull and trendOkLong
+bool newBear = okBear and not na(lvlBear) and lvlBear < aBear and lvlBear > bBear and trendOkShort
 if dir == 0 and (newBull or newBear)
     dir := newBull ? 1 : -1
     pointA := newBull ? aBull : aBear
@@ -191,35 +377,84 @@ if dir == 0 and (newBull or newBear)
             spHi := math.max(spHi, nz(high[k], spHi))
             spLo := math.min(spLo, nz(low[k], spLo))
         color zc = dir == 1 ? bullColor : bearColor
-        spikeBox := box.new(bar_index - runSel + 1, spHi, bar_index, spLo, bgcolor = color.new(zc, 88), border_color = color.new(zc, 60))
+        spikeBox := box.new(bar_index - runSel + 1, spHi, bar_index, spLo,
+             bgcolor = color.new(zc, 88), border_color = color.new(zc, 60),
+             text = "SPIKE", text_size = size.tiny, text_color = color.new(zc, 40),
+             text_halign = text.align_center, text_valign = dir == 1 ? text.align_top : text.align_bottom)
 
-// --- keep live lines glued to the current bar
 if dir != 0 and not na(lnL)
     line.set_x2(lnL, bar_index)
     line.set_x2(lnA, bar_index)
 
-// ---------------------------------------------------------------- signal drawings
-if (longFire or shortFire) and showTrade
-    color c = longFire ? bullColor : bearColor
-    line.new(bar_index, sigEntry, bar_index + 8, sigEntry, color = c, width = 2)
-    line.new(bar_index, sigSL, bar_index + 8, sigSL, color = color.red, width = 2)
-    line.new(bar_index, sigTP, bar_index + 8, sigTP, color = color.green, width = 2)
-    string txt = (longFire ? "BTB ▲ LONG" : "BTB ▼ SHORT")
-         + "\nE  " + str.tostring(sigEntry, format.mintick)
-         + "\nSL " + str.tostring(sigSL, format.mintick)
-         + "\nTP " + str.tostring(sigTP, format.mintick)
-    label.new(bar_index, longFire ? low : high, txt,
-         style = longFire ? label.style_label_up : label.style_label_down,
+// ------------------------------------------- 4) open the trade on a signal
+if longFire or shortFire
+    tDir := longFire ? 1 : -1
+    // Limit fill at the level (or better on a favourable gap open).
+    tEntry := tDir == 1 ? math.min(level, open) : math.max(level, open)
+    float spLen0 = math.abs(pointB - pointA)
+    tInitSL := tDir == 1 ? pointA - spLen0 * slBufferPct : pointA + spLen0 * slBufferPct
+    tSL := tInitSL
+    float Ru = math.abs(tEntry - tInitSL)
+    tTP1 := tEntry + (tDir == 1 ? 1 : -1) * partialRR * Ru
+    tTP2 := tEntry + (tDir == 1 ? 1 : -1) * btbRr * Ru
+    tEntryBar := bar_index
+    tPartial := false
+    tBE := false
+    tTrail := false
+    tRealR := 0.0
+    color c = tDir == 1 ? bullColor : bearColor
+    eLn := line.new(bar_index, tEntry, bar_index + 1, tEntry, color = c, width = 2)
+    sLn := line.new(bar_index, tSL, bar_index + 1, tSL, color = color.red, width = 2)
+    t2Ln := line.new(bar_index, tTP2, bar_index + 1, tTP2, color = color.green, width = 2)
+    if usePartial
+        t1Ln := line.new(bar_index, tTP1, bar_index + 1, tTP1, color = color.new(color.green, 40), width = 1, style = line.style_dashed)
+    string txt = (tDir == 1 ? "BTB ▲ LONG" : "BTB ▼ SHORT")
+         + "\nE  " + str.tostring(tEntry, format.mintick)
+         + "\nSL " + str.tostring(tSL, format.mintick)
+         + (usePartial ? "\nTP1 " + str.tostring(tTP1, format.mintick) : "")
+         + "\nTP " + str.tostring(tTP2, format.mintick)
+    label.new(bar_index, tDir == 1 ? low : high, txt,
+         style = tDir == 1 ? label.style_label_up : label.style_label_down,
          color = color.new(c, 15), textcolor = color.white, size = size.small)
+    bool slHit0 = tDir == 1 ? low <= tSL : high >= tSL
+    bool tpHit0 = tDir == 1 ? high >= tTP2 : low <= tTP2
+    if slHit0 or tpHit0
+        float r0 = (slHit0 ? -1.0 : btbRr) - costR
+        float px0 = slHit0 ? tSL : tTP2
+        line.set_x2(eLn, bar_index)
+        line.set_x2(sLn, bar_index)
+        line.set_x2(t2Ln, bar_index)
+        if not na(t1Ln)
+            line.set_x2(t1Ln, bar_index)
+        color oc0 = slHit0 ? color.red : c
+        label.new(bar_index, px0, (slHit0 ? "SL " : "TP ") + fmtR(r0),
+             style = tDir == 1 ? label.style_label_down : label.style_label_up,
+             color = color.new(oc0, 20), textcolor = color.white, size = size.small)
+        logTrade(time, tDir, r0)
+        closedThisBar := true
+        tDir := 0
+        eLn := na
+        sLn := na
+        t1Ln := na
+        t2Ln := na
+
+if tDir != 0 and not na(eLn)
+    line.set_x2(eLn, bar_index)
+    line.set_x2(sLn, bar_index)
+    line.set_x2(t2Ln, bar_index)
+    if not na(t1Ln) and not tPartial
+        line.set_x2(t1Ln, bar_index)
 
 plotshape(longFire,  "BTB long",  shape.triangleup,   location.belowbar, color = bullColor, size = size.tiny)
 plotshape(shortFire, "BTB short", shape.triangledown, location.abovebar, color = bearColor, size = size.tiny)
+plot(emaLen > 0 ? emaVal : na, "Trend EMA", color = color.new(color.yellow, 30), linewidth = 2)
 
 // ---------------------------------------------------------------- status table
-var table tbl = table.new(position.top_right, 2, 4, bgcolor = color.new(color.black, 35), border_width = 1, border_color = color.new(color.gray, 60))
+var table tbl = table.new(position.top_right, 2, 5, bgcolor = color.new(color.black, 35), border_width = 1, border_color = color.new(color.gray, 60))
 if showTable and barstate.islast
     string stTxt = dir == 0 ? "IDLE" : "AWAIT RETEST"
     color stCol = dir == 1 ? bullColor : dir == -1 ? bearColor : color.gray
+    float liveR = tDir != 0 and math.abs(tEntry - tInitSL) > 0 ? tRealR + (tDir == 1 ? close - tEntry : tEntry - close) / math.abs(tEntry - tInitSL) * (tPartial ? 1.0 - partialPct / 100.0 : 1.0) : na
     table.cell(tbl, 0, 0, "ProBTB", text_color = color.white, text_size = size.small)
     table.cell(tbl, 1, 0, stTxt,    text_color = color.white, text_size = size.small, bgcolor = color.new(stCol, 30))
     table.cell(tbl, 0, 1, "Dir",    text_color = color.silver, text_size = size.small)
@@ -228,8 +463,57 @@ if showTable and barstate.islast
     table.cell(tbl, 1, 2, dir != 0 ? str.tostring(level, format.mintick) : "—", text_color = color.blue, text_size = size.small)
     table.cell(tbl, 0, 3, "Stop A",  text_color = color.silver, text_size = size.small)
     table.cell(tbl, 1, 3, dir != 0 ? str.tostring(pointA, format.mintick) : "—", text_color = color.red, text_size = size.small)
+    table.cell(tbl, 0, 4, "Trade", text_color = color.silver, text_size = size.small)
+    table.cell(tbl, 1, 4, tDir == 0 ? "FLAT" : (tDir == 1 ? "OPEN ▲ " : "OPEN ▼ ") + fmtR(liveR),
+         text_color = tDir == 0 ? color.white : liveR >= 0 ? color.lime : color.red, text_size = size.small)
+
+// ---------------------------------------------------------------- dashboard
+var table dash = table.new(position.bottom_right, 3, dashDays + dashList + 3,
+     bgcolor = color.new(color.black, 25), border_width = 1, border_color = color.new(color.gray, 65))
+if showDash and barstate.islast
+    table.clear(dash, 0, 0, 2, dashDays + dashList + 2)
+    int row = 0
+    table.cell(dash, 0, row, "Day",  text_color = color.silver, text_size = size.small)
+    table.cell(dash, 1, row, "N (W)", text_color = color.silver, text_size = size.small)
+    table.cell(dash, 2, row, "Net R", text_color = color.silver, text_size = size.small)
+    row += 1
+    int nd = array.size(dayIds)
+    for i = 0 to dashDays - 1
+        int idx = nd - 1 - i
+        if idx >= 0
+            int dayid = array.get(dayIds, idx)
+            float r = array.get(dayRs, idx)
+            string dstr = pad2(math.floor(dayid / 100) % 100) + "-" + pad2(dayid % 100)
+            table.cell(dash, 0, row, dstr, text_color = color.white, text_size = size.small)
+            table.cell(dash, 1, row, str.tostring(array.get(dayNs, idx)) + " (" + str.tostring(array.get(dayWs, idx)) + "W)", text_color = color.white, text_size = size.small)
+            table.cell(dash, 2, row, fmtR(r), text_color = r >= 0 ? color.lime : color.red, text_size = size.small)
+            row += 1
+    float totR = array.size(dayRs) > 0 ? array.sum(dayRs) : 0.0
+    int totN = array.size(tRs)
+    table.cell(dash, 0, row, "Σ total", text_color = color.white, text_size = size.small, bgcolor = color.new(color.gray, 70))
+    table.cell(dash, 1, row, str.tostring(totN), text_color = color.white, text_size = size.small, bgcolor = color.new(color.gray, 70))
+    table.cell(dash, 2, row, fmtR(totR), text_color = totR >= 0 ? color.lime : color.red, text_size = size.small, bgcolor = color.new(color.gray, 70))
+    row += 1
+    table.cell(dash, 0, row, "Time",  text_color = color.silver, text_size = size.tiny)
+    table.cell(dash, 1, row, "Dir",   text_color = color.silver, text_size = size.tiny)
+    table.cell(dash, 2, row, "R",     text_color = color.silver, text_size = size.tiny)
+    row += 1
+    int nt = array.size(tRs)
+    for i = 0 to dashList - 1
+        int idx = nt - 1 - i
+        if idx >= 0
+            int tt = array.get(tTimes, idx)
+            float r = array.get(tRs, idx)
+            int d = array.get(tDirs, idx)
+            string tstr = pad2(month(tt)) + "-" + pad2(dayofmonth(tt)) + " " + pad2(hour(tt)) + ":" + pad2(minute(tt))
+            table.cell(dash, 0, row, tstr, text_color = color.white, text_size = size.tiny)
+            table.cell(dash, 1, row, d == 1 ? "▲" : "▼", text_color = d == 1 ? bullColor : bearColor, text_size = size.tiny)
+            table.cell(dash, 2, row, fmtR(r), text_color = r >= 0 ? color.lime : color.red, text_size = size.tiny)
+            row += 1
 
 // ---------------------------------------------------------------- alerts
 alertcondition(longFire,  "BTB Long",  "Pro BTB: long retest entry at the broken level")
 alertcondition(shortFire, "BTB Short", "Pro BTB: short retest entry at the broken level")
 alertcondition(longFire or shortFire, "BTB Any signal", "Pro BTB: entry signal triggered")
+alertcondition(partialThisBar, "BTB Partial filled", "Pro BTB: partial take-profit filled")
+alertcondition(closedThisBar, "BTB Trade closed", "Pro BTB: trade closed (see chart label for the result)")

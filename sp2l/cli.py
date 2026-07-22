@@ -53,6 +53,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--be-offset-r", type=float, default=0.0,
                    help="lock this many R when moving to breakeven")
     p.add_argument("--daily", action="store_true", help="print the per-day report")
+    p.add_argument("--trail-atr", type=float, default=0.0,
+                   help="ATR trailing stop multiplier (0 = off)")
+    p.add_argument("--trend-ema", type=int, default=0,
+                   help="trend filter EMA length: long above / short below (0 = off)")
+    p.add_argument("--min-pullback-bars", type=int, default=1,
+                   help="SP2L: min bars between pullback start and breakout")
+    p.add_argument("--min-retrace", type=float, default=0.0,
+                   help="SP2L: min pullback depth as fraction of spike (0 = off)")
+    p.add_argument("--cost-r", type=float, default=0.0,
+                   help="round-trip cost per trade, in R")
+    p.add_argument("--max-trades-day", type=int, default=0,
+                   help="daily guard: max trades per day (0 = off)")
+    p.add_argument("--max-daily-loss-r", type=float, default=0.0,
+                   help="daily guard: stop trading after losing this many R in a day (0 = off)")
     p.add_argument("--btb-lookback", type=int, default=10,
                    help="bars before the spike to find the broken level")
     p.add_argument("--btb-rr", type=float, default=2.0)
@@ -94,6 +108,13 @@ def main(argv=None) -> int:
         be_mode=args.be,
         be_trigger_rr=args.be_trigger_rr,
         be_offset_r=args.be_offset_r,
+        trail_atr_mult=args.trail_atr,
+        trend_ema_len=args.trend_ema,
+        min_pullback_bars=args.min_pullback_bars,
+        min_retrace=args.min_retrace,
+        cost_r=args.cost_r,
+        max_trades_per_day=args.max_trades_day,
+        max_daily_loss_r=args.max_daily_loss_r,
         session_filter=args.session_filter,
         session_start=args.session_start,
         session_end=args.session_end,
