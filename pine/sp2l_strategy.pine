@@ -1,0 +1,150 @@
+//@version=5
+// SP2L (Spike - 2 Leg - Level) strategy, after Mohammad Ali Poursamadi.
+// Logic mirrors the Python implementation in this repo (sp2l/strategy.py):
+//   spike (consecutive strong candles + FVG + ATR power) -> pullback ->
+//   breakout of the last spike candle -> SL behind spike origin, TP at rr*risk.
+strategy("SP2L Poursamadi", overlay = true,
+     initial_capital = 10000,
+     default_qty_type = strategy.percent_of_equity,
+     commission_type = strategy.commission.percent, commission_value = 0.0)
+
+// ---------------------------------------------------------------- inputs
+minSpikeBars   = input.int(3,     "Minimum spike bars",       minval = 2)
+minBodyRatio   = input.float(0.5, "Min body/range ratio",     minval = 0.1, maxval = 1.0, step = 0.05)
+dojiTolerance  = input.int(1,     "Doji tolerance",           minval = 0)
+maxDojiRatio   = input.float(0.25,"Max doji body ratio",      minval = 0.0, maxval = 0.5, step = 0.05)
+requireGap     = input.bool(true, "Require P-Gap (FVG) inside spike")
+powerMult      = input.float(1.5, "Movement power (x ATR, 0 = off)", minval = 0.0, step = 0.1)
+atrLen         = input.int(14,    "ATR length", minval = 1)
+maxWaitBars    = input.int(20,    "Max bars to wait after spike", minval = 1)
+rr             = input.float(1.0, "Risk : Reward", minval = 0.1, step = 0.1)
+slBufferPct    = input.float(0.0, "SL buffer (% of spike)", minval = 0.0, maxval = 0.5, step = 0.05)
+useSession     = input.bool(false,"Session filter")
+sess           = input.session("1330-2000", "Session (exchange tz)")
+
+// ---------------------------------------------------------------- helpers
+rng       = high - low
+bodyRatio = rng > 0 ? math.abs(close - open) / rng : 0.0
+isDoji    = bodyRatio <= maxDojiRatio
+strongBull = close > open and bodyRatio >= minBodyRatio and not isDoji
+strongBear = close < open and bodyRatio >= minBodyRatio and not isDoji
+atr       = ta.atr(atrLen)
+inSession = not useSession or not na(time(timeframe.period, sess))
+
+// Count the current run of spike-compatible candles (strong + tolerated dojis).
+countRun(simple bool bullish) =>
+    run = 0
+    dojis = 0
+    strong = 0
+    ok = true
+    for i = 0 to 200
+        if not ok
+            break
+        s = bullish ? strongBull[i] : strongBear[i]
+        d = isDoji[i]
+        if s
+            strong += 1
+            run += 1
+        else if d and dojis < dojiTolerance
+            dojis += 1
+            run += 1
+        else
+            ok := false
+    [run, strong]
+
+hasFvg(int startOff, simple bool bullish) =>
+    found = false
+    for k = 0 to startOff - 1
+        if bullish and low[k] > high[k + 2]
+            found := true
+        if not bullish and high[k] < low[k + 2]
+            found := true
+    found
+
+// ---------------------------------------------------------------- state
+var int   dir       = 0      // 0 idle, 1 long setup, -1 short setup
+var float pointA    = na     // spike origin (SL anchor)
+var float pointB    = na     // entry level (last spike candle extreme)
+var int   spikeEnd  = na
+var bool  inPull    = false
+var int   pullStart = na
+
+resetSetup() =>
+    dir := 0
+    pointA := na
+    pointB := na
+    spikeEnd := na
+    inPull := false
+    pullStart := na
+
+// Expiry / invalidation.
+if dir != 0
+    spikeLen = math.abs(pointB - pointA)
+    invalid = dir == 1 ? low <= pointB - spikeLen : high >= pointB + spikeLen
+    if bar_index - spikeEnd > maxWaitBars or invalid
+        resetSetup()
+
+// Spike extension (contiguous strong candle only).
+if dir != 0 and not inPull and bar_index == spikeEnd + 1
+    if dir == 1 and strongBull
+        spikeEnd := bar_index
+        pointB := high
+    else if dir == -1 and strongBear
+        spikeEnd := bar_index
+        pointB := low
+
+// Pullback start.
+if dir != 0 and not inPull and bar_index > spikeEnd
+    pullbackNow = dir == 1 ? (low < low[1] or close < open) : (high > high[1] or close > open)
+    if pullbackNow
+        inPull := true
+        pullStart := bar_index
+
+// Entry trigger: breakout of point B strictly after the pullback bar.
+longSignal  = dir == 1  and inPull and bar_index > pullStart and high > pointB
+shortSignal = dir == -1 and inPull and bar_index > pullStart and low  < pointB
+
+if longSignal or shortSignal
+    spikeLen = math.abs(pointB - pointA)
+    buffer = spikeLen * slBufferPct
+    if inSession
+        if longSignal
+            entryPx = math.max(pointB, open)
+            slPx = pointA - buffer
+            tpPx = entryPx + rr * (entryPx - slPx)
+            strategy.entry("SP2L L", strategy.long, stop = pointB)
+            strategy.exit("x L", "SP2L L", stop = slPx, limit = tpPx)
+        else
+            entryPx = math.min(pointB, open)
+            slPx = pointA + buffer
+            tpPx = entryPx - rr * (slPx - entryPx)
+            strategy.entry("SP2L S", strategy.short, stop = pointB)
+            strategy.exit("x S", "SP2L S", stop = slPx, limit = tpPx)
+    resetSetup()
+
+// New spike detection (only when idle).
+if dir == 0
+    [runB, strongB] = countRun(true)
+    [runS, strongS] = countRun(false)
+    detect(simple bool bullish, int run, int strong) =>
+        okLen = run >= minSpikeBars and strong >= minSpikeBars - dojiTolerance
+        okLast = bullish ? strongBull : strongBear
+        okGap = not requireGap or hasFvg(run - 1, bullish)
+        move = bullish ? high - low[run - 1] : high[run - 1] - low
+        okPow = powerMult <= 0 or na(atr) or move >= powerMult * atr
+        okLen and okLast and okGap and okPow
+    if detect(true, runB, strongB)
+        dir := 1
+        pointA := low[runB - 1]
+        pointB := high
+        spikeEnd := bar_index
+    else if runS >= minSpikeBars and detect(false, runS, strongS)
+        dir := -1
+        pointA := high[runS - 1]
+        pointB := low
+        spikeEnd := bar_index
+
+// ---------------------------------------------------------------- plots
+plot(dir != 0 ? pointB : na, "Entry level (B)", color = color.new(color.orange, 0), style = plot.style_linebr)
+plot(dir != 0 ? pointA : na, "Stop level (A)",  color = color.new(color.red, 40),   style = plot.style_linebr)
+bgcolor(dir == 1 ? color.new(color.teal, 92) : dir == -1 ? color.new(color.maroon, 92) : na)
