@@ -1,0 +1,235 @@
+//@version=5
+// Pro BTB (Professional Back To Breakeven) indicator, after Mohammad Ali
+// Poursamadi. Mirrors the Python implementation in sp2l/btb.py:
+//   spike (same engine as SP2L) breaks a key level L (prior-range extreme,
+//   A < L < B) -> price retests L -> limit entry at L, SL behind the spike
+//   origin (A), TP at btbRr * risk (default 2R).
+indicator("Pro BTB Poursamadi [Indicator]", "ProBTB", overlay = true,
+     max_lines_count = 500, max_labels_count = 500, max_boxes_count = 500)
+
+// ---------------------------------------------------------------- inputs
+grpDet = "Spike detection"
+minSpikeBars  = input.int(3,     "Minimum spike bars",   minval = 2, group = grpDet)
+minBodyRatio  = input.float(0.5, "Min body/range ratio", minval = 0.1, maxval = 1.0, step = 0.05, group = grpDet)
+dojiTolerance = input.int(1,     "Doji tolerance",       minval = 0, group = grpDet)
+maxDojiRatio  = input.float(0.25,"Max doji body ratio",  minval = 0.0, maxval = 0.5, step = 0.05, group = grpDet)
+requireGap    = input.bool(true, "Require P-Gap (FVG) inside spike", group = grpDet)
+powerMult     = input.float(1.5, "Movement power (x ATR, 0 = off)", minval = 0.0, step = 0.1, group = grpDet)
+atrLen        = input.int(14,    "ATR length", minval = 1, group = grpDet)
+
+grpBtb = "BTB setup"
+lvlLookback = input.int(10,    "Level lookback (bars before spike)", minval = 1, group = grpBtb)
+btbRr       = input.float(2.0, "Risk : Reward", minval = 0.1, step = 0.1, group = grpBtb)
+maxWaitBars = input.int(30,    "Max bars to wait for retest", minval = 1, group = grpBtb)
+slBufferPct = input.float(0.0, "SL buffer (fraction of spike)", minval = 0.0, maxval = 0.5, step = 0.05, group = grpBtb)
+useSession  = input.bool(false, "Session filter", group = grpBtb)
+sess        = input.session("1330-2000", "Session (exchange tz)", group = grpBtb)
+
+grpVis = "Display"
+showLevel  = input.bool(true, "Show broken level (L)", group = grpVis)
+showSpike  = input.bool(true, "Highlight spike zone", group = grpVis)
+showTrade  = input.bool(true, "Show entry/SL/TP on signal", group = grpVis)
+showTable  = input.bool(true, "Show status table", group = grpVis)
+bullColor  = input.color(color.teal,   "Bull", inline = "c", group = grpVis)
+bearColor  = input.color(color.maroon, "Bear", inline = "c", group = grpVis)
+
+// ---------------------------------------------------------------- helpers
+rng        = high - low
+bodyRatio  = rng > 0 ? math.abs(close - open) / rng : 0.0
+isDoji     = bodyRatio <= maxDojiRatio
+strongBull = close > open and bodyRatio >= minBodyRatio and not isDoji
+strongBear = close < open and bodyRatio >= minBodyRatio and not isDoji
+atrVal     = ta.atr(atrLen)
+inSession  = not useSession or not na(time(timeframe.period, sess))
+
+sbN = strongBull ? 1 : 0
+ssN = strongBear ? 1 : 0
+djN = isDoji ? 1 : 0
+
+countRun(simple bool bullish) =>
+    int run = 0
+    int dojis = 0
+    int strong = 0
+    bool ok = true
+    for i = 0 to 300
+        if not ok
+            break
+        bool s = bullish ? nz(sbN[i]) == 1 : nz(ssN[i]) == 1
+        bool d = nz(djN[i]) == 1
+        if s
+            strong += 1
+            run += 1
+        else if d and dojis < dojiTolerance
+            dojis += 1
+            run += 1
+        else
+            ok := false
+    [run, strong]
+
+hasFvg(int runLen, simple bool bullish) =>
+    bool found = false
+    if runLen >= 2
+        for k = 0 to runLen - 2
+            if k + 2 <= bar_index
+                if bullish and low[k] > high[k + 2]
+                    found := true
+                if not bullish and high[k] < low[k + 2]
+                    found := true
+    found
+
+detectSpike(simple bool bullish) =>
+    [run, strong] = countRun(bullish)
+    bool ok = false
+    float pA = na
+    float pB = na
+    bool lastStrong = bullish ? strongBull : strongBear
+    if run >= minSpikeBars and strong >= minSpikeBars - dojiTolerance and lastStrong and run - 1 <= bar_index
+        bool okGap = not requireGap or hasFvg(run, bullish)
+        float move = bullish ? high - low[run - 1] : high[run - 1] - low
+        bool okPow = powerMult <= 0 or na(atrVal) or move >= powerMult * atrVal
+        if okGap and okPow
+            ok := true
+            pA := bullish ? low[run - 1] : high[run - 1]
+            pB := bullish ? high : low
+    [ok, pA, pB, run]
+
+// Broken level: prior-range extreme in the lookback window before the run.
+findLevel(int run, simple bool bullish) =>
+    float lvl = na
+    for k = run to run + lvlLookback - 1
+        if k <= bar_index
+            float v = bullish ? high[k] : low[k]
+            lvl := na(lvl) ? v : (bullish ? math.max(lvl, v) : math.min(lvl, v))
+    lvl
+
+[okBull, aBull, bBull, runBull] = detectSpike(true)
+[okBear, aBear, bBear, runBear] = detectSpike(false)
+lvlBull = findLevel(runBull, true)
+lvlBear = findLevel(runBear, false)
+
+// ---------------------------------------------------------------- state
+var int   dir      = 0      // 0 idle, 1 long setup, -1 short setup
+var float pointA   = na     // spike origin (SL anchor)
+var float pointB   = na     // spike extreme
+var float level    = na     // broken level (retest target)
+var int   spikeEnd = na
+var line  lnL = na
+var line  lnA = na
+var box   spikeBox = na
+
+bool  longFire  = false
+bool  shortFire = false
+float sigEntry  = na
+float sigSL     = na
+float sigTP     = na
+
+// --- expiry
+if dir != 0 and bar_index - spikeEnd > maxWaitBars
+    if not na(lnL)
+        line.set_color(lnL, color.new(color.gray, 70))
+        line.set_color(lnA, color.new(color.gray, 70))
+    dir := 0
+    lnL := na
+    lnA := na
+    spikeBox := na
+
+// --- spike extension (contiguous strong candle only); L and A stay put
+if dir != 0 and bar_index == spikeEnd + 1 and (dir == 1 ? strongBull : strongBear)
+    spikeEnd := bar_index
+    pointB := dir == 1 ? high : low
+    if not na(spikeBox)
+        box.set_right(spikeBox, bar_index)
+        if dir == 1
+            box.set_top(spikeBox, math.max(box.get_top(spikeBox), pointB))
+        else
+            box.set_bottom(spikeBox, math.min(box.get_bottom(spikeBox), pointB))
+
+// --- retest of the broken level -> limit entry at L
+else if dir != 0 and bar_index > spikeEnd
+    bool touched = dir == 1 ? low <= level : high >= level
+    if touched
+        float spLen = math.abs(pointB - pointA)
+        float buffer = spLen * slBufferPct
+        float stopPx = dir == 1 ? pointA - buffer : pointA + buffer
+        bool gapped = dir == 1 ? open <= stopPx : open >= stopPx
+        if not gapped and inSession
+            if dir == 1
+                sigEntry := math.min(level, open)
+                sigSL := stopPx
+                sigTP := sigEntry + btbRr * (sigEntry - sigSL)
+                longFire := true
+            else
+                sigEntry := math.max(level, open)
+                sigSL := stopPx
+                sigTP := sigEntry - btbRr * (sigSL - sigEntry)
+                shortFire := true
+        if not na(lnL)
+            line.set_x2(lnL, bar_index)
+            line.set_x2(lnA, bar_index)
+        dir := 0
+        lnL := na
+        lnA := na
+        spikeBox := na
+
+// --- adopt a freshly detected spike whose level qualifies (A < L < B)
+bool newBull = okBull and not na(lvlBull) and lvlBull > aBull and lvlBull < bBull
+bool newBear = okBear and not na(lvlBear) and lvlBear < aBear and lvlBear > bBear
+if dir == 0 and (newBull or newBear)
+    dir := newBull ? 1 : -1
+    pointA := newBull ? aBull : aBear
+    pointB := newBull ? bBull : bBear
+    level := newBull ? lvlBull : lvlBear
+    int runSel = newBull ? runBull : runBear
+    spikeEnd := bar_index
+    if showLevel
+        lnL := line.new(bar_index, level, bar_index + 1, level, color = color.blue, width = 2)
+        lnA := line.new(bar_index, pointA, bar_index + 1, pointA, color = color.new(color.red, 30), width = 1, style = line.style_dashed)
+    if showSpike
+        float spHi = high
+        float spLo = low
+        for k = 0 to runSel - 1
+            spHi := math.max(spHi, nz(high[k], spHi))
+            spLo := math.min(spLo, nz(low[k], spLo))
+        color zc = dir == 1 ? bullColor : bearColor
+        spikeBox := box.new(bar_index - runSel + 1, spHi, bar_index, spLo, bgcolor = color.new(zc, 88), border_color = color.new(zc, 60))
+
+// --- keep live lines glued to the current bar
+if dir != 0 and not na(lnL)
+    line.set_x2(lnL, bar_index)
+    line.set_x2(lnA, bar_index)
+
+// ---------------------------------------------------------------- signal drawings
+if (longFire or shortFire) and showTrade
+    color c = longFire ? bullColor : bearColor
+    line.new(bar_index, sigEntry, bar_index + 8, sigEntry, color = c, width = 2)
+    line.new(bar_index, sigSL, bar_index + 8, sigSL, color = color.red, width = 2)
+    line.new(bar_index, sigTP, bar_index + 8, sigTP, color = color.green, width = 2)
+    string txt = (longFire ? "BTB ▲ LONG" : "BTB ▼ SHORT")
+         + "\nE  " + str.tostring(sigEntry, format.mintick)
+         + "\nSL " + str.tostring(sigSL, format.mintick)
+         + "\nTP " + str.tostring(sigTP, format.mintick)
+    label.new(bar_index, longFire ? low : high, txt,
+         style = longFire ? label.style_label_up : label.style_label_down,
+         color = color.new(c, 15), textcolor = color.white, size = size.small)
+
+plotshape(longFire,  "BTB long",  shape.triangleup,   location.belowbar, color = bullColor, size = size.tiny)
+plotshape(shortFire, "BTB short", shape.triangledown, location.abovebar, color = bearColor, size = size.tiny)
+
+// ---------------------------------------------------------------- status table
+var table tbl = table.new(position.top_right, 2, 4, bgcolor = color.new(color.black, 35), border_width = 1, border_color = color.new(color.gray, 60))
+if showTable and barstate.islast
+    string stTxt = dir == 0 ? "IDLE" : "AWAIT RETEST"
+    color stCol = dir == 1 ? bullColor : dir == -1 ? bearColor : color.gray
+    table.cell(tbl, 0, 0, "ProBTB", text_color = color.white, text_size = size.small)
+    table.cell(tbl, 1, 0, stTxt,    text_color = color.white, text_size = size.small, bgcolor = color.new(stCol, 30))
+    table.cell(tbl, 0, 1, "Dir",    text_color = color.silver, text_size = size.small)
+    table.cell(tbl, 1, 1, dir == 1 ? "LONG" : dir == -1 ? "SHORT" : "—", text_color = color.white, text_size = size.small)
+    table.cell(tbl, 0, 2, "Level L", text_color = color.silver, text_size = size.small)
+    table.cell(tbl, 1, 2, dir != 0 ? str.tostring(level, format.mintick) : "—", text_color = color.blue, text_size = size.small)
+    table.cell(tbl, 0, 3, "Stop A",  text_color = color.silver, text_size = size.small)
+    table.cell(tbl, 1, 3, dir != 0 ? str.tostring(pointA, format.mintick) : "—", text_color = color.red, text_size = size.small)
+
+// ---------------------------------------------------------------- alerts
+alertcondition(longFire,  "BTB Long",  "Pro BTB: long retest entry at the broken level")
+alertcondition(shortFire, "BTB Short", "Pro BTB: short retest entry at the broken level")
+alertcondition(longFire or shortFire, "BTB Any signal", "Pro BTB: entry signal triggered")
