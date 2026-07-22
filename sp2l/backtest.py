@@ -1,17 +1,20 @@
-"""Bar-by-bar backtester for the SP2L strategy.
+"""Bar-by-bar backtester for the SP2L / Pro BTB strategies.
 
 Fill model (conservative):
-  - Entry fills on the breakout bar at the entry level (or at the open when
-    the bar gaps past the level).
+  - Entry fills on the signal bar at the level (or at the open when the bar
+    gaps past it). On the entry bar only SL/TP are checked - partial and
+    breakeven management starts from the next bar.
   - When both SL and TP are touched inside the same bar, SL is assumed hit
-    first.
+    first. Breakeven moves apply from the bar after the trigger.
   - One position at a time; signals arriving while a trade is open are skipped.
 """
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence
+from datetime import date
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from .btb import BTBStrategy
 from .models import Bar, Config, Direction, Trade
@@ -91,6 +94,23 @@ class BacktestResult:
             out.setdefault(t.tag, []).append(t)
         return out
 
+    def daily(self) -> "OrderedDict[date, List[Trade]]":
+        """Closed trades grouped by exit day, in chronological order."""
+        out: "OrderedDict[date, List[Trade]]" = OrderedDict()
+        for t in sorted(self.closed, key=lambda t: t.exit_ts):
+            out.setdefault(t.exit_ts.date(), []).append(t)
+        return out
+
+    def daily_summary(self) -> List[Tuple[date, int, int, float, float]]:
+        """Per-day rows: (day, trades, wins, net_pnl, net_r)."""
+        rows = []
+        for day, ts in self.daily().items():
+            wins = sum(1 for t in ts if t.pnl > 0)
+            rows.append(
+                (day, len(ts), wins, sum(t.pnl for t in ts), sum(t.r_multiple for t in ts))
+            )
+        return rows
+
     def summary(self) -> str:
         lines = [
             f"Trades          : {self.total_trades}",
@@ -165,8 +185,9 @@ class Backtester:
                         trade.scale_in_price = signal.entry - half
                     trades.append(trade)
                     open_trade = trade
-                    # The breakout bar itself may already reach SL or TP.
-                    exited = self._check_exit(open_trade, bar, idx)
+                    # The signal bar itself may already reach SL or TP;
+                    # partial/BE management starts on the next bar.
+                    exited = self._check_exit(open_trade, bar, idx, manage=False)
                     if exited:
                         equity += open_trade.pnl
                         open_trade = None
@@ -197,28 +218,52 @@ class Backtester:
             trade.size *= 2
             trade.scaled_in = True
 
-    def _check_exit(self, trade: Trade, bar: Bar, idx: int) -> bool:
-        if trade.direction is Direction.LONG:
-            if bar.low <= trade.stop:  # conservative: SL first
-                self._close(trade, idx, bar, trade.stop, "stop")
-                return True
-            if bar.high >= trade.target:
-                self._close(trade, idx, bar, trade.target, "target")
-                return True
-        else:
-            if bar.high >= trade.stop:
-                self._close(trade, idx, bar, trade.stop, "stop")
-                return True
-            if bar.low <= trade.target:
-                self._close(trade, idx, bar, trade.target, "target")
-                return True
+    def _check_exit(self, trade: Trade, bar: Bar, idx: int, manage: bool = True) -> bool:
+        cfg = self.config
+        sign = 1 if trade.direction is Direction.LONG else -1
+        risk = trade.risk_per_unit
+
+        def touched(price: float, from_below: bool) -> bool:
+            return bar.high >= price if from_below else bar.low <= price
+
+        # Conservative: the stop is always checked first.
+        if touched(trade.stop, from_below=trade.direction is Direction.SHORT):
+            stop_recovers = sign * (trade.stop - trade.entry) >= 0
+            reason = "be-stop" if trade.be_done and stop_recovers else "stop"
+            self._close(trade, idx, bar, trade.stop, reason)
+            return True
+
+        if manage and risk > 0:
+            # Partial take-profit at partial_rr R.
+            if cfg.partial_enabled and not trade.partial_done:
+                tp1 = trade.entry + sign * cfg.partial_rr * risk
+                if touched(tp1, from_below=trade.direction is Direction.LONG):
+                    trade.realized_pnl += sign * (tp1 - trade.entry) * trade.size * cfg.partial_pct
+                    trade.partial_done = True
+                    if cfg.be_mode == "after_partial" and not trade.be_done:
+                        self._move_to_breakeven(trade, sign, risk)
+            # Breakeven trigger by R level.
+            if cfg.be_mode == "rr" and not trade.be_done:
+                trigger = trade.entry + sign * cfg.be_trigger_rr * risk
+                if touched(trigger, from_below=trade.direction is Direction.LONG):
+                    self._move_to_breakeven(trade, sign, risk)
+
+        if touched(trade.target, from_below=trade.direction is Direction.LONG):
+            self._close(trade, idx, bar, trade.target, "target")
+            return True
         return False
 
-    @staticmethod
-    def _close(trade: Trade, idx: int, bar: Bar, price: float, reason: str) -> None:
+    def _move_to_breakeven(self, trade: Trade, sign: int, risk: float) -> None:
+        """Move the stop to entry + offset, never loosening it."""
+        new_stop = trade.entry + sign * self.config.be_offset_r * risk
+        trade.stop = max(trade.stop, new_stop) if sign > 0 else min(trade.stop, new_stop)
+        trade.be_done = True
+
+    def _close(self, trade: Trade, idx: int, bar: Bar, price: float, reason: str) -> None:
         trade.exit_idx = idx
         trade.exit_ts = bar.ts
         trade.exit_price = price
         trade.exit_reason = reason
         sign = 1 if trade.direction is Direction.LONG else -1
-        trade.pnl = sign * (price - trade.entry) * trade.size
+        remaining = 1.0 - self.config.partial_pct if trade.partial_done else 1.0
+        trade.pnl = trade.realized_pnl + sign * (price - trade.entry) * trade.size * remaining

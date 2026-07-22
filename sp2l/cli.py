@@ -42,6 +42,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--scale-in", action="store_true")
     p.add_argument("--setup", choices=("both", "sp2l", "btb"), default="both",
                    help="which setups to trade (both = BTB priority, then SP2L)")
+    p.add_argument("--partial", action="store_true",
+                   help="take a partial profit at --partial-rr")
+    p.add_argument("--partial-rr", type=float, default=1.0)
+    p.add_argument("--partial-pct", type=float, default=0.5,
+                   help="fraction of the position closed at the partial (0-1)")
+    p.add_argument("--be", choices=("off", "rr", "after_partial"), default="off",
+                   help="breakeven mode: move SL to entry when triggered")
+    p.add_argument("--be-trigger-rr", type=float, default=1.0)
+    p.add_argument("--be-offset-r", type=float, default=0.0,
+                   help="lock this many R when moving to breakeven")
+    p.add_argument("--daily", action="store_true", help="print the per-day report")
     p.add_argument("--btb-lookback", type=int, default=10,
                    help="bars before the spike to find the broken level")
     p.add_argument("--btb-rr", type=float, default=2.0)
@@ -77,6 +88,12 @@ def main(argv=None) -> int:
         btb_level_lookback=args.btb_lookback,
         btb_rr=args.btb_rr,
         btb_max_wait_bars=args.btb_max_wait_bars,
+        partial_enabled=args.partial,
+        partial_rr=args.partial_rr,
+        partial_pct=args.partial_pct,
+        be_mode=args.be,
+        be_trigger_rr=args.be_trigger_rr,
+        be_offset_r=args.be_offset_r,
         session_filter=args.session_filter,
         session_start=args.session_start,
         session_end=args.session_end,
@@ -91,14 +108,22 @@ def main(argv=None) -> int:
     result = Backtester(cfg).run(bars)
     print(result.summary())
 
+    if args.daily:
+        print("\nday          trades  wins   net_pnl        R")
+        for day, n, wins, pnl, r in result.daily_summary():
+            print(f"{day}   {n:<7}{wins:<6}{pnl:>+10.2f}   {r:>+6.2f}R")
+
     if args.trades:
-        print("\n#   setup  dir    entry_ts              entry      stop       target     exit    pnl")
+        print(
+            "\n#   setup  dir    entry_ts              entry      stop       target"
+            "     exit      pnl          R"
+        )
         for i, t in enumerate(result.closed, 1):
             print(
                 f"{i:<3} {t.tag:<6} {t.direction.name:<6}"
                 f" {t.entry_ts:%Y-%m-%d %H:%M}     "
-                f" {t.entry:<10.2f} {t.stop:<10.2f} {t.target:<10.2f}"
-                f" {t.exit_reason:<7} {t.pnl:+.2f}"
+                f" {t.entry:<10.2f} {t.init_stop:<10.2f} {t.target:<10.2f}"
+                f" {t.exit_reason:<9} {t.pnl:+10.2f}  {t.r_multiple:+6.2f}R"
             )
     return 0
 
