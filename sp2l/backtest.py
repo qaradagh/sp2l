@@ -11,10 +11,13 @@ Fill model (conservative):
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence
 
+from .btb import BTBStrategy
 from .models import Bar, Config, Direction, Trade
 from .strategy import SP2LStrategy
+
+STRATEGY_REGISTRY = {"sp2l": SP2LStrategy, "btb": BTBStrategy}
 
 
 @dataclass
@@ -82,6 +85,12 @@ class BacktestResult:
         ]
         return sum(rs) / len(rs) if rs else 0.0
 
+    def by_tag(self) -> Dict[str, List[Trade]]:
+        out: Dict[str, List[Trade]] = {}
+        for t in self.closed:
+            out.setdefault(t.tag, []).append(t)
+        return out
+
     def summary(self) -> str:
         lines = [
             f"Trades          : {self.total_trades}",
@@ -95,6 +104,17 @@ class BacktestResult:
             if self.equity_curve
             else "Final equity    : n/a",
         ]
+        groups = self.by_tag()
+        if len(groups) > 1:
+            lines.append("Per setup:")
+            for tag in sorted(groups):
+                ts = groups[tag]
+                wins = sum(1 for t in ts if t.pnl > 0)
+                net = sum(t.pnl for t in ts)
+                lines.append(
+                    f"  {tag:<6}: {len(ts)} trades, "
+                    f"win rate {wins / len(ts):.1%}, net {net:+,.2f}"
+                )
         return "\n".join(lines)
 
 
@@ -105,7 +125,9 @@ class Backtester:
     def run(self, bars: Sequence[Bar]) -> BacktestResult:
         cfg = self.config
         cfg.validate()
-        strategy = SP2LStrategy(cfg)
+        # Independent state machines; list order = priority when several
+        # setups signal on the same bar.
+        strategies = [STRATEGY_REGISTRY[name](cfg) for name in cfg.enabled_setups]
         equity = cfg.initial_equity
         trades: List[Trade] = []
         equity_curve: List[float] = []
@@ -120,7 +142,9 @@ class Backtester:
                     equity += open_trade.pnl
                     open_trade = None
 
-            signal = strategy.on_bar(bar)
+            # Every strategy sees every bar so their states stay current.
+            signals = [s for s in (st.on_bar(bar) for st in strategies) if s]
+            signal = signals[0] if signals else None
 
             if signal is not None and open_trade is None:
                 risk_amount = equity * cfg.risk_per_trade
@@ -133,6 +157,7 @@ class Backtester:
                         entry=signal.entry,
                         stop=signal.stop,
                         target=signal.target,
+                        tag=signal.tag,
                         size=risk_amount / per_unit,
                     )
                     if cfg.scale_in:

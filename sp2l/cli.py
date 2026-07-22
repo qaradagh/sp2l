@@ -40,6 +40,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rr", type=float, default=1.0)
     p.add_argument("--sl-buffer-pct", type=float, default=0.0)
     p.add_argument("--scale-in", action="store_true")
+    p.add_argument("--setup", choices=("both", "sp2l", "btb"), default="both",
+                   help="which setups to trade (both = BTB priority, then SP2L)")
+    p.add_argument("--btb-lookback", type=int, default=10,
+                   help="bars before the spike to find the broken level")
+    p.add_argument("--btb-rr", type=float, default=2.0)
+    p.add_argument("--btb-max-wait-bars", type=int, default=30)
     p.add_argument("--session-filter", action="store_true")
     p.add_argument("--session-start", type=_parse_time, default=time(13, 30), metavar="HH:MM")
     p.add_argument("--session-end", type=_parse_time, default=time(20, 0), metavar="HH:MM")
@@ -67,6 +73,10 @@ def main(argv=None) -> int:
         rr=args.rr,
         sl_buffer_pct=args.sl_buffer_pct,
         scale_in=args.scale_in,
+        enabled_setups=("btb", "sp2l") if args.setup == "both" else (args.setup,),
+        btb_level_lookback=args.btb_lookback,
+        btb_rr=args.btb_rr,
+        btb_max_wait_bars=args.btb_max_wait_bars,
         session_filter=args.session_filter,
         session_start=args.session_start,
         session_end=args.session_end,
@@ -82,10 +92,10 @@ def main(argv=None) -> int:
     print(result.summary())
 
     if args.trades:
-        print("\n#   dir    entry_ts              entry      stop       target     exit    pnl")
+        print("\n#   setup  dir    entry_ts              entry      stop       target     exit    pnl")
         for i, t in enumerate(result.closed, 1):
             print(
-                f"{i:<3} {t.direction.name:<6}"
+                f"{i:<3} {t.tag:<6} {t.direction.name:<6}"
                 f" {t.entry_ts:%Y-%m-%d %H:%M}     "
                 f" {t.entry:<10.2f} {t.stop:<10.2f} {t.target:<10.2f}"
                 f" {t.exit_reason:<7} {t.pnl:+.2f}"

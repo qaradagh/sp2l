@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, time
 from enum import Enum
-from typing import Optional
+from typing import Optional, Tuple
 
 
 class Direction(Enum):
@@ -76,15 +76,29 @@ class Config:
     initial_equity: float = 10_000.0
     risk_per_trade: float = 0.01
 
+    # Pro BTB (Back To Breakeven) — docs/BTB_BLUEPRINT.md
+    btb_level_lookback: int = 10
+    btb_rr: float = 2.0
+    btb_max_wait_bars: int = 30
+
+    # Which setups the backtester runs, in priority order (first wins when
+    # several signal on the same bar).
+    enabled_setups: Tuple[str, ...] = ("btb", "sp2l")
+
     def validate(self) -> None:
         if self.min_spike_bars < 2:
             raise ValueError("min_spike_bars must be >= 2")
         if not 0 < self.min_body_ratio <= 1:
             raise ValueError("min_body_ratio must be in (0, 1]")
-        if self.rr <= 0:
-            raise ValueError("rr must be positive")
+        if self.rr <= 0 or self.btb_rr <= 0:
+            raise ValueError("rr and btb_rr must be positive")
         if self.max_retrace <= 0:
             raise ValueError("max_retrace must be positive")
+        if self.btb_level_lookback < 1:
+            raise ValueError("btb_level_lookback must be >= 1")
+        unknown = set(self.enabled_setups) - {"sp2l", "btb"}
+        if unknown:
+            raise ValueError(f"unknown setups: {sorted(unknown)}")
 
 
 @dataclass
@@ -99,6 +113,7 @@ class Setup:
     created_idx: int
     in_pullback: bool = False
     pullback_start_idx: Optional[int] = None
+    level: Optional[float] = None  # BTB: the broken key level (retest target)
 
     @property
     def spike_len(self) -> float:
@@ -115,6 +130,7 @@ class Trade:
     entry: float
     stop: float
     target: float
+    tag: str = "sp2l"
     size: float = 0.0
     scale_in_price: Optional[float] = None
     scaled_in: bool = False
@@ -141,4 +157,5 @@ class Signal:
     entry: float
     stop: float
     target: float
+    tag: str = "sp2l"
     setup: Setup = field(repr=False, default=None)

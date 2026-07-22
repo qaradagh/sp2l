@@ -34,16 +34,31 @@ def true_ranges(bars: Sequence[Bar]) -> List[float]:
     return out
 
 
-class SP2LStrategy:
-    """Feed bars one by one via on_bar(); returns a Signal when entry triggers."""
+class SpikeDetectorBase:
+    """Shared spike-detection engine used by SP2L and Pro BTB.
+
+    Subclasses call _append_bar() at the top of on_bar() and use
+    _detect_spike() plus the helper predicates to drive their own lifecycle.
+    """
 
     def __init__(self, config: Optional[Config] = None):
         self.cfg = config or Config()
         self.cfg.validate()
-        self.state = State.IDLE
-        self.setup: Optional[Setup] = None
         self._bars: List[Bar] = []
         self._trs: List[float] = []
+
+    def _append_bar(self, bar: Bar) -> int:
+        """Track the bar and its true range; returns the bar index."""
+        self._bars.append(bar)
+        idx = len(self._bars) - 1
+        if idx == 0:
+            self._trs.append(bar.range)
+        else:
+            prev_close = self._bars[idx - 1].close
+            self._trs.append(
+                max(bar.high - bar.low, abs(bar.high - prev_close), abs(bar.low - prev_close))
+            )
+        return idx
 
     # ------------------------------------------------------------------ utils
 
@@ -157,6 +172,16 @@ class SP2LStrategy:
             )
         return None
 
+class SP2LStrategy(SpikeDetectorBase):
+    """Feed bars one by one via on_bar(); returns a Signal when entry triggers."""
+
+    tag = "sp2l"
+
+    def __init__(self, config: Optional[Config] = None):
+        super().__init__(config)
+        self.state = State.IDLE
+        self.setup: Optional[Setup] = None
+
     # ------------------------------------------------------------- lifecycle
 
     def _invalidated(self, bar: Bar) -> bool:
@@ -215,15 +240,7 @@ class SP2LStrategy:
 
     def on_bar(self, bar: Bar) -> Optional[Signal]:
         """Process the next bar; returns a Signal when an entry triggers."""
-        self._bars.append(bar)
-        idx = len(self._bars) - 1
-        if idx == 0:
-            self._trs.append(bar.range)
-        else:
-            prev_close = self._bars[idx - 1].close
-            self._trs.append(
-                max(bar.high - bar.low, abs(bar.high - prev_close), abs(bar.low - prev_close))
-            )
+        idx = self._append_bar(bar)
 
         if self.state in (State.SPIKE_CONFIRMED, State.PULLBACK):
             if self._expired(idx) or self._invalidated(bar):
