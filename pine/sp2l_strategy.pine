@@ -1,47 +1,55 @@
 //@version=5
 // SP2L (Spike - 2 Leg - Level) strategy, after Mohammad Ali Poursamadi.
-// Logic mirrors the Python implementation in this repo (sp2l/strategy.py):
-//   spike (consecutive strong candles + FVG + ATR power) -> pullback ->
-//   breakout of the last spike candle -> SL behind spike origin, TP at rr*risk.
-strategy("SP2L Poursamadi", overlay = true,
+// Mirrors the Python implementation in sp2l/strategy.py. When a pullback
+// starts, a stop order is parked at the entry level (B) so TradingView can
+// fill it intrabar at the level, like the Python backtester does. The order
+// is cancelled if the setup expires or is invalidated.
+strategy("SP2L Poursamadi [Strategy]", "SP2L strat", overlay = true,
      initial_capital = 10000,
-     default_qty_type = strategy.percent_of_equity,
      commission_type = strategy.commission.percent, commission_value = 0.0)
 
 // ---------------------------------------------------------------- inputs
-minSpikeBars   = input.int(3,     "Minimum spike bars",       minval = 2)
-minBodyRatio   = input.float(0.5, "Min body/range ratio",     minval = 0.1, maxval = 1.0, step = 0.05)
-dojiTolerance  = input.int(1,     "Doji tolerance",           minval = 0)
-maxDojiRatio   = input.float(0.25,"Max doji body ratio",      minval = 0.0, maxval = 0.5, step = 0.05)
-requireGap     = input.bool(true, "Require P-Gap (FVG) inside spike")
-powerMult      = input.float(1.5, "Movement power (x ATR, 0 = off)", minval = 0.0, step = 0.1)
-atrLen         = input.int(14,    "ATR length", minval = 1)
-maxWaitBars    = input.int(20,    "Max bars to wait after spike", minval = 1)
-rr             = input.float(1.0, "Risk : Reward", minval = 0.1, step = 0.1)
-slBufferPct    = input.float(0.0, "SL buffer (% of spike)", minval = 0.0, maxval = 0.5, step = 0.05)
-useSession     = input.bool(false,"Session filter")
-sess           = input.session("1330-2000", "Session (exchange tz)")
+grpDet = "Spike detection"
+minSpikeBars  = input.int(3,     "Minimum spike bars",   minval = 2, group = grpDet)
+minBodyRatio  = input.float(0.5, "Min body/range ratio", minval = 0.1, maxval = 1.0, step = 0.05, group = grpDet)
+dojiTolerance = input.int(1,     "Doji tolerance",       minval = 0, group = grpDet)
+maxDojiRatio  = input.float(0.25,"Max doji body ratio",  minval = 0.0, maxval = 0.5, step = 0.05, group = grpDet)
+requireGap    = input.bool(true, "Require P-Gap (FVG) inside spike", group = grpDet)
+powerMult     = input.float(1.5, "Movement power (x ATR, 0 = off)", minval = 0.0, step = 0.1, group = grpDet)
+atrLen        = input.int(14,    "ATR length", minval = 1, group = grpDet)
+
+grpSet = "Setup lifecycle"
+maxRetrace  = input.float(1.0, "Max pullback retrace (x spike)", minval = 0.1, step = 0.1, group = grpSet)
+maxWaitBars = input.int(20,    "Max bars to wait after spike", minval = 1, group = grpSet)
+rr          = input.float(1.0, "Risk : Reward", minval = 0.1, step = 0.1, group = grpSet)
+slBufferPct = input.float(0.0, "SL buffer (fraction of spike)", minval = 0.0, maxval = 0.5, step = 0.05, group = grpSet)
+riskPct     = input.float(1.0, "Risk per trade (% of equity)", minval = 0.1, maxval = 10.0, step = 0.1, group = grpSet)
+useSession  = input.bool(false, "Session filter", group = grpSet)
+sess        = input.session("1330-2000", "Session (exchange tz)", group = grpSet)
 
 // ---------------------------------------------------------------- helpers
-rng       = high - low
-bodyRatio = rng > 0 ? math.abs(close - open) / rng : 0.0
-isDoji    = bodyRatio <= maxDojiRatio
+rng        = high - low
+bodyRatio  = rng > 0 ? math.abs(close - open) / rng : 0.0
+isDoji     = bodyRatio <= maxDojiRatio
 strongBull = close > open and bodyRatio >= minBodyRatio and not isDoji
 strongBear = close < open and bodyRatio >= minBodyRatio and not isDoji
-atr       = ta.atr(atrLen)
-inSession = not useSession or not na(time(timeframe.period, sess))
+atrVal     = ta.atr(atrLen)
+inSession  = not useSession or not na(time(timeframe.period, sess))
 
-// Count the current run of spike-compatible candles (strong + tolerated dojis).
+sbN = strongBull ? 1 : 0
+ssN = strongBear ? 1 : 0
+djN = isDoji ? 1 : 0
+
 countRun(simple bool bullish) =>
-    run = 0
-    dojis = 0
-    strong = 0
-    ok = true
-    for i = 0 to 200
+    int run = 0
+    int dojis = 0
+    int strong = 0
+    bool ok = true
+    for i = 0 to 300
         if not ok
             break
-        s = bullish ? strongBull[i] : strongBear[i]
-        d = isDoji[i]
+        bool s = bullish ? nz(sbN[i]) == 1 : nz(ssN[i]) == 1
+        bool d = nz(djN[i]) == 1
         if s
             strong += 1
             run += 1
@@ -52,97 +60,105 @@ countRun(simple bool bullish) =>
             ok := false
     [run, strong]
 
-hasFvg(int startOff, simple bool bullish) =>
-    found = false
-    for k = 0 to startOff - 1
-        if bullish and low[k] > high[k + 2]
-            found := true
-        if not bullish and high[k] < low[k + 2]
-            found := true
+hasFvg(int runLen, simple bool bullish) =>
+    bool found = false
+    if runLen >= 2
+        for k = 0 to runLen - 2
+            if k + 2 <= bar_index
+                if bullish and low[k] > high[k + 2]
+                    found := true
+                if not bullish and high[k] < low[k + 2]
+                    found := true
     found
 
+detectSpike(simple bool bullish) =>
+    [run, strong] = countRun(bullish)
+    bool ok = false
+    float pA = na
+    float pB = na
+    bool lastStrong = bullish ? strongBull : strongBear
+    if run >= minSpikeBars and strong >= minSpikeBars - dojiTolerance and lastStrong and run - 1 <= bar_index
+        bool okGap = not requireGap or hasFvg(run, bullish)
+        float move = bullish ? high - low[run - 1] : high[run - 1] - low
+        bool okPow = powerMult <= 0 or na(atrVal) or move >= powerMult * atrVal
+        if okGap and okPow
+            ok := true
+            pA := bullish ? low[run - 1] : high[run - 1]
+            pB := bullish ? high : low
+    [ok, pA, pB, run]
+
+[okBull, aBull, bBull, runBull] = detectSpike(true)
+[okBear, aBear, bBear, runBear] = detectSpike(false)
+
 // ---------------------------------------------------------------- state
-var int   dir       = 0      // 0 idle, 1 long setup, -1 short setup
-var float pointA    = na     // spike origin (SL anchor)
-var float pointB    = na     // entry level (last spike candle extreme)
+var int   dir       = 0
+var float pointA    = na
+var float pointB    = na
 var int   spikeEnd  = na
 var bool  inPull    = false
 var int   pullStart = na
+var bool  ordered   = false   // stop order parked at B
 
-resetSetup() =>
+// --- an order from this setup filled: hand over to strategy.exit
+if dir != 0 and ordered and strategy.position_size != 0
     dir := 0
-    pointA := na
-    pointB := na
-    spikeEnd := na
     inPull := false
     pullStart := na
+    ordered := false
 
-// Expiry / invalidation.
+// --- expiry / invalidation
 if dir != 0
-    spikeLen = math.abs(pointB - pointA)
-    invalid = dir == 1 ? low <= pointB - spikeLen : high >= pointB + spikeLen
+    float spLen = math.abs(pointB - pointA)
+    bool invalid = dir == 1 ? low <= pointB - spLen * maxRetrace : high >= pointB + spLen * maxRetrace
     if bar_index - spikeEnd > maxWaitBars or invalid
-        resetSetup()
+        if ordered
+            strategy.cancel("SP2L L")
+            strategy.cancel("SP2L S")
+        dir := 0
+        inPull := false
+        pullStart := na
+        ordered := false
 
-// Spike extension (contiguous strong candle only).
+// --- spike extension (contiguous strong candle only, before any pullback)
 if dir != 0 and not inPull and bar_index == spikeEnd + 1
-    if dir == 1 and strongBull
+    bool extended = dir == 1 ? strongBull : strongBear
+    if extended
         spikeEnd := bar_index
-        pointB := high
-    else if dir == -1 and strongBear
-        spikeEnd := bar_index
-        pointB := low
+        pointB := dir == 1 ? high : low
 
-// Pullback start.
+// --- pullback start: park the stop order at B with SL/TP attached
 if dir != 0 and not inPull and bar_index > spikeEnd
-    pullbackNow = dir == 1 ? (low < low[1] or close < open) : (high > high[1] or close > open)
-    if pullbackNow
+    bool pb = dir == 1 ? (low < low[1] or close < open) : (high > high[1] or close > open)
+    if pb
         inPull := true
         pullStart := bar_index
+        if strategy.position_size == 0 and inSession
+            float spLen = math.abs(pointB - pointA)
+            float buffer = spLen * slBufferPct
+            if dir == 1
+                float slPx = pointA - buffer
+                float perUnit = pointB - slPx
+                float qty = perUnit > 0 ? strategy.equity * riskPct / 100.0 / perUnit : na
+                if not na(qty)
+                    strategy.entry("SP2L L", strategy.long, qty = qty, stop = pointB)
+                    strategy.exit("x L", "SP2L L", stop = slPx, limit = pointB + rr * perUnit)
+                    ordered := true
+            else
+                float slPx = pointA + buffer
+                float perUnit = slPx - pointB
+                float qty = perUnit > 0 ? strategy.equity * riskPct / 100.0 / perUnit : na
+                if not na(qty)
+                    strategy.entry("SP2L S", strategy.short, qty = qty, stop = pointB)
+                    strategy.exit("x S", "SP2L S", stop = slPx, limit = pointB - rr * perUnit)
+                    ordered := true
 
-// Entry trigger: breakout of point B strictly after the pullback bar.
-longSignal  = dir == 1  and inPull and bar_index > pullStart and high > pointB
-shortSignal = dir == -1 and inPull and bar_index > pullStart and low  < pointB
-
-if longSignal or shortSignal
-    spikeLen = math.abs(pointB - pointA)
-    buffer = spikeLen * slBufferPct
-    if inSession
-        if longSignal
-            entryPx = math.max(pointB, open)
-            slPx = pointA - buffer
-            tpPx = entryPx + rr * (entryPx - slPx)
-            strategy.entry("SP2L L", strategy.long, stop = pointB)
-            strategy.exit("x L", "SP2L L", stop = slPx, limit = tpPx)
-        else
-            entryPx = math.min(pointB, open)
-            slPx = pointA + buffer
-            tpPx = entryPx - rr * (slPx - entryPx)
-            strategy.entry("SP2L S", strategy.short, stop = pointB)
-            strategy.exit("x S", "SP2L S", stop = slPx, limit = tpPx)
-    resetSetup()
-
-// New spike detection (only when idle).
-if dir == 0
-    [runB, strongB] = countRun(true)
-    [runS, strongS] = countRun(false)
-    detect(simple bool bullish, int run, int strong) =>
-        okLen = run >= minSpikeBars and strong >= minSpikeBars - dojiTolerance
-        okLast = bullish ? strongBull : strongBear
-        okGap = not requireGap or hasFvg(run - 1, bullish)
-        move = bullish ? high - low[run - 1] : high[run - 1] - low
-        okPow = powerMult <= 0 or na(atr) or move >= powerMult * atr
-        okLen and okLast and okGap and okPow
-    if detect(true, runB, strongB)
-        dir := 1
-        pointA := low[runB - 1]
-        pointB := high
-        spikeEnd := bar_index
-    else if runS >= minSpikeBars and detect(false, runS, strongS)
-        dir := -1
-        pointA := high[runS - 1]
-        pointB := low
-        spikeEnd := bar_index
+// --- adopt a freshly detected spike when idle
+if dir == 0 and (okBull or okBear)
+    dir := okBull ? 1 : -1
+    pointA := okBull ? aBull : aBear
+    pointB := okBull ? bBull : bBear
+    spikeEnd := bar_index
+    ordered := false
 
 // ---------------------------------------------------------------- plots
 plot(dir != 0 ? pointB : na, "Entry level (B)", color = color.new(color.orange, 0), style = plot.style_linebr)
