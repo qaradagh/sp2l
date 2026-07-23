@@ -53,6 +53,29 @@ showTable  = input.bool(true, "Show status table", group = grpVis)
 bullColor  = input.color(color.teal,   "Bull", inline = "c", group = grpVis)
 bearColor  = input.color(color.maroon, "Bear", inline = "c", group = grpVis)
 
+grpLine = "Trade lines"
+lineStyleInp     = input.string("Solid", "Line style", options = ["Solid", "Dashed", "Dotted"], group = grpLine)
+lineWidthInp     = input.int(2, "Line width", minval = 1, maxval = 5, group = grpLine)
+lineExtendBars   = input.int(0, "Extend lines right (bars)", minval = 0, maxval = 100, group = grpLine)
+showSignalPrices = input.bool(true, "Show E/SL/TP prices in the signal label", group = grpLine)
+entryColInp      = input.color(color.orange, "Entry", inline = "lc", group = grpLine)
+slColInp         = input.color(color.red,    "Stop", inline = "lc", group = grpLine)
+tpColInp         = input.color(color.green,  "Target", inline = "lc", group = grpLine)
+
+grpRR = "Risk / reward zones"
+showRR      = input.bool(true, "Show risk/reward zones (position-tool style)", group = grpRR)
+riskColor   = input.color(color.new(color.red, 82),   "Risk (SL) zone", inline = "rr", group = grpRR)
+rewardColor = input.color(color.new(color.green, 82), "Reward (TP) zone", inline = "rr", group = grpRR)
+showRRText  = input.bool(true, "Show R:R ratio label", group = grpRR)
+
+grpBox = "Box transparency"
+spikeBg     = input.int(88, "Spike fill", minval = 0, maxval = 100, inline = "sp", group = grpBox)
+spikeBorder = input.int(60, "border", minval = 0, maxval = 100, inline = "sp", group = grpBox)
+
+grpHist = "History"
+useHistory  = input.bool(false, "Limit chart drawings to recent days", group = grpHist)
+historyDays = input.int(10, "Days of history to draw", minval = 1, maxval = 120, group = grpHist)
+
 grpDash = "Dashboard"
 showDash = input.bool(true, "Show dashboard", group = grpDash)
 dashDays = input.int(5,  "Days shown", minval = 1, maxval = 15, group = grpDash)
@@ -73,6 +96,12 @@ trendOkShort = emaLen == 0 or close < emaVal
 sbN = strongBull ? 1 : 0
 ssN = strongBear ? 1 : 0
 djN = isDoji ? 1 : 0
+
+// Derived line style + history gate.
+lineStyle = lineStyleInp == "Dashed" ? line.style_dashed : lineStyleInp == "Dotted" ? line.style_dotted : line.style_solid
+msPerDay  = 24 * 60 * 60 * 1000
+// last_bar_time follows the bar-replay cursor, so this gate works in replay too.
+drawOK    = not useHistory or time >= last_bar_time - historyDays * msPerDay
 
 pad2(int v) =>
     v < 10 ? "0" + str.tostring(v) : str.tostring(v)
@@ -275,6 +304,9 @@ var line eLn  = na
 var line sLn  = na
 var line t1Ln = na
 var line t2Ln = na
+var box   riskBox   = na
+var box   rewardBox = na
+var label rrLbl     = na
 
 if tDir != 0 and bar_index > tEntryBar and not closeNow and not na(sLn)
     line.set_y1(sLn, tSL)
@@ -292,10 +324,14 @@ if closeNow
         line.set_x2(t2Ln, bar_index)
         if not na(t1Ln)
             line.set_x2(t1Ln, math.min(line.get_x2(t1Ln), bar_index))
-    color oc = closeTag == "TP" ? (tDir == 1 ? bullColor : bearColor) : closeTag == "SL" ? color.red : color.blue
-    label.new(bar_index, closePx, closeTag + " " + fmtR(closeR),
-         style = tDir == 1 ? label.style_label_down : label.style_label_up,
-         color = color.new(oc, 20), textcolor = color.white, size = size.small)
+    if not na(riskBox)
+        box.set_right(riskBox, bar_index)
+        box.set_right(rewardBox, bar_index)
+    if drawOK
+        color oc = closeTag == "TP" ? (tDir == 1 ? bullColor : bearColor) : closeTag == "SL" ? color.red : color.blue
+        label.new(bar_index, closePx, closeTag + " " + fmtR(closeR),
+             style = tDir == 1 ? label.style_label_down : label.style_label_up,
+             color = color.new(oc, 20), textcolor = color.white, size = size.small)
     logTrade(time, tDir, closeR)
     closedThisBar := true
     tDir := 0
@@ -303,13 +339,16 @@ if closeNow
     sLn := na
     t1Ln := na
     t2Ln := na
+    riskBox := na
+    rewardBox := na
+    rrLbl := na
 
 // ------------------------------------------- 2) setup lifecycle
 if dir != 0 and bar_index - spikeEnd > maxWaitBars
     if not na(lnL)
         line.set_color(lnL, color.new(color.gray, 70))
         line.set_color(lnA, color.new(color.gray, 70))
-    if showFate
+    if showFate and drawOK
         label.new(bar_index, level, "✖ Expired", style = label.style_label_left,
              color = color.new(color.gray, 60), textcolor = color.white, size = size.tiny)
     dir := 0
@@ -334,19 +373,19 @@ else if dir != 0 and bar_index > spikeEnd
         float stopPx = dir == 1 ? pointA - buffer : pointA + buffer
         bool gapped = dir == 1 ? open <= stopPx : open >= stopPx
         if gapped
-            if showFate
+            if showFate and drawOK
                 label.new(bar_index, level, "✖ Gapped through", style = label.style_label_left,
                      color = color.new(color.gray, 60), textcolor = color.white, size = size.tiny)
         else if not inSession
-            if showFate
+            if showFate and drawOK
                 label.new(bar_index, level, "◌ Off-session", style = label.style_label_left,
                      color = color.new(color.gray, 60), textcolor = color.white, size = size.tiny)
         else if tDir != 0
-            if showFate
+            if showFate and drawOK
                 label.new(bar_index, level, "◌ Skipped (in trade)", style = label.style_label_left,
                      color = color.new(color.gray, 60), textcolor = color.white, size = size.tiny)
         else if guardBlocked
-            if showFate
+            if showFate and drawOK
                 label.new(bar_index, level, "◌ Daily limit", style = label.style_label_left,
                      color = color.new(color.gray, 60), textcolor = color.white, size = size.tiny)
         else
@@ -372,10 +411,10 @@ if dir == 0 and (newBull or newBear)
     level := newBull ? lvlBull : lvlBear
     int runSel = newBull ? runBull : runBear
     spikeEnd := bar_index
-    if showLevel
+    if showLevel and drawOK
         lnL := line.new(bar_index, level, bar_index + 1, level, color = color.blue, width = 2)
         lnA := line.new(bar_index, pointA, bar_index + 1, pointA, color = color.new(color.red, 30), width = 1, style = line.style_dashed)
-    if showSpike
+    if showSpike and drawOK
         float spHi = high
         float spLo = low
         for k = 0 to runSel - 1
@@ -383,7 +422,7 @@ if dir == 0 and (newBull or newBear)
             spLo := math.min(spLo, nz(low[k], spLo))
         color zc = dir == 1 ? bullColor : bearColor
         spikeBox := box.new(bar_index - runSel + 1, spHi, bar_index, spLo,
-             bgcolor = color.new(zc, 88), border_color = color.new(zc, 60),
+             bgcolor = color.new(zc, spikeBg), border_color = color.new(zc, spikeBorder),
              text = "SPIKE", text_size = size.tiny, text_color = color.new(zc, 40),
              text_halign = text.align_center, text_valign = dir == 1 ? text.align_top : text.align_bottom)
 
@@ -408,33 +447,51 @@ if longFire or shortFire
     tTrail := false
     tRealR := 0.0
     color c = tDir == 1 ? bullColor : bearColor
-    eLn := line.new(bar_index, tEntry, bar_index + 1, tEntry, color = c, width = 2)
-    sLn := line.new(bar_index, tSL, bar_index + 1, tSL, color = color.red, width = 2)
-    t2Ln := line.new(bar_index, tTP2, bar_index + 1, tTP2, color = color.green, width = 2)
-    if usePartial
-        t1Ln := line.new(bar_index, tTP1, bar_index + 1, tTP1, color = color.new(color.green, 40), width = 1, style = line.style_dashed)
-    string txt = (tDir == 1 ? "BTB ▲ LONG" : "BTB ▼ SHORT")
-         + "\nE  " + str.tostring(tEntry, format.mintick)
-         + "\nSL " + str.tostring(tSL, format.mintick)
-         + (usePartial ? "\nTP1 " + str.tostring(tTP1, format.mintick) : "")
-         + "\nTP " + str.tostring(tTP2, format.mintick)
-    label.new(bar_index, tDir == 1 ? low : high, txt,
-         style = tDir == 1 ? label.style_label_up : label.style_label_down,
-         color = color.new(c, 15), textcolor = color.white, size = size.small)
+    int x2 = bar_index + 1 + lineExtendBars
+    if drawOK
+        eLn := line.new(bar_index, tEntry, x2, tEntry, color = entryColInp, width = lineWidthInp, style = lineStyle)
+        sLn := line.new(bar_index, tSL, x2, tSL, color = slColInp, width = lineWidthInp, style = lineStyle)
+        t2Ln := line.new(bar_index, tTP2, x2, tTP2, color = tpColInp, width = lineWidthInp, style = lineStyle)
+        if usePartial
+            t1Ln := line.new(bar_index, tTP1, x2, tTP1, color = color.new(tpColInp, 40), width = 1, style = line.style_dashed)
+        if showRR
+            float rTop = math.max(tEntry, tInitSL)
+            float rBot = math.min(tEntry, tInitSL)
+            float wTop = math.max(tEntry, tTP2)
+            float wBot = math.min(tEntry, tTP2)
+            riskBox := box.new(bar_index, rTop, x2, rBot, bgcolor = riskColor, border_color = color.new(slColInp, 75), border_width = 1)
+            rewardBox := box.new(bar_index, wTop, x2, wBot, bgcolor = rewardColor, border_color = color.new(tpColInp, 75), border_width = 1)
+            if showRRText
+                float rrRatio = math.abs(tTP2 - tEntry) / math.abs(tEntry - tInitSL)
+                rrLbl := label.new(bar_index, tTP2, "R:R 1:" + str.tostring(rrRatio, "0.0"),
+                     style = label.style_label_left, color = color.new(tpColInp, 25), textcolor = color.white, size = size.tiny)
+        string txt = (tDir == 1 ? "BTB ▲ LONG" : "BTB ▼ SHORT")
+             + (showSignalPrices ? "\nE  " + str.tostring(tEntry, format.mintick)
+                 + "\nSL " + str.tostring(tSL, format.mintick)
+                 + (usePartial ? "\nTP1 " + str.tostring(tTP1, format.mintick) : "")
+                 + "\nTP " + str.tostring(tTP2, format.mintick) : "")
+        label.new(bar_index, tDir == 1 ? low : high, txt,
+             style = tDir == 1 ? label.style_label_up : label.style_label_down,
+             color = color.new(c, 15), textcolor = color.white, size = size.small)
     bool slHit0 = tDir == 1 ? low <= tSL : high >= tSL
     bool tpHit0 = tDir == 1 ? high >= tTP2 : low <= tTP2
     if slHit0 or tpHit0
         float r0 = (slHit0 ? -1.0 : btbRr) - costR
         float px0 = slHit0 ? tSL : tTP2
-        line.set_x2(eLn, bar_index)
-        line.set_x2(sLn, bar_index)
-        line.set_x2(t2Ln, bar_index)
-        if not na(t1Ln)
-            line.set_x2(t1Ln, bar_index)
-        color oc0 = slHit0 ? color.red : c
-        label.new(bar_index, px0, (slHit0 ? "SL " : "TP ") + fmtR(r0),
-             style = tDir == 1 ? label.style_label_down : label.style_label_up,
-             color = color.new(oc0, 20), textcolor = color.white, size = size.small)
+        if not na(eLn)
+            line.set_x2(eLn, bar_index)
+            line.set_x2(sLn, bar_index)
+            line.set_x2(t2Ln, bar_index)
+            if not na(t1Ln)
+                line.set_x2(t1Ln, bar_index)
+        if not na(riskBox)
+            box.set_right(riskBox, bar_index)
+            box.set_right(rewardBox, bar_index)
+        if drawOK
+            color oc0 = slHit0 ? color.red : c
+            label.new(bar_index, px0, (slHit0 ? "SL " : "TP ") + fmtR(r0),
+                 style = tDir == 1 ? label.style_label_down : label.style_label_up,
+                 color = color.new(oc0, 20), textcolor = color.white, size = size.small)
         logTrade(time, tDir, r0)
         closedThisBar := true
         tDir := 0
@@ -442,13 +499,22 @@ if longFire or shortFire
         sLn := na
         t1Ln := na
         t2Ln := na
+        riskBox := na
+        rewardBox := na
+        rrLbl := na
 
-if tDir != 0 and not na(eLn)
-    line.set_x2(eLn, bar_index)
-    line.set_x2(sLn, bar_index)
-    line.set_x2(t2Ln, bar_index)
-    if not na(t1Ln) and not tPartial
-        line.set_x2(t1Ln, bar_index)
+// keep live trade lines + RR zones glued to the current bar (+ optional extension)
+if tDir != 0
+    int xr = bar_index + lineExtendBars
+    if not na(eLn)
+        line.set_x2(eLn, xr)
+        line.set_x2(sLn, xr)
+        line.set_x2(t2Ln, xr)
+        if not na(t1Ln) and not tPartial
+            line.set_x2(t1Ln, xr)
+    if not na(riskBox)
+        box.set_right(riskBox, xr)
+        box.set_right(rewardBox, xr)
 
 plotshape(longFire,  "BTB long",  shape.triangleup,   location.belowbar, color = bullColor, size = size.tiny)
 plotshape(shortFire, "BTB short", shape.triangledown, location.abovebar, color = bearColor, size = size.tiny)
