@@ -67,6 +67,37 @@ class Config:
     sl_buffer_pct: float = 0.0
     scale_in: bool = False
 
+    # Partial take-profit: close partial_pct of the position at partial_rr R.
+    partial_enabled: bool = False
+    partial_rr: float = 1.0
+    partial_pct: float = 0.5
+
+    # Breakeven (risk-free): move SL to entry + be_offset_r * R once triggered.
+    # Modes: "off", "rr" (price reaches be_trigger_rr R), "after_partial".
+    be_mode: str = "off"
+    be_trigger_rr: float = 1.0
+    be_offset_r: float = 0.0
+
+    # ATR trailing stop (0 = off). Trails at close -/+ mult * ATR, only ever
+    # tightening the stop.
+    trail_atr_mult: float = 0.0
+
+    # Trend filter: only long above / short below an EMA of closes (0 = off).
+    trend_ema_len: int = 0
+
+    # SP2L pullback quality: minimum bars between pullback start and breakout,
+    # and minimum pullback depth as a fraction of the spike (0 = off).
+    min_pullback_bars: int = 1
+    min_retrace: float = 0.0
+
+    # Round-trip trading cost per trade, in R (spread + commission).
+    cost_r: float = 0.0
+
+    # Daily risk guard: block new entries after this many trades per day or
+    # once the day's net R hits -max_daily_loss_r (0 = off).
+    max_trades_per_day: int = 0
+    max_daily_loss_r: float = 0.0
+
     # Session filter (UTC)
     session_filter: bool = False
     session_start: time = time(13, 30)
@@ -96,6 +127,18 @@ class Config:
             raise ValueError("max_retrace must be positive")
         if self.btb_level_lookback < 1:
             raise ValueError("btb_level_lookback must be >= 1")
+        if self.partial_rr <= 0:
+            raise ValueError("partial_rr must be positive")
+        if not 0 < self.partial_pct < 1:
+            raise ValueError("partial_pct must be in (0, 1)")
+        if self.be_mode not in ("off", "rr", "after_partial"):
+            raise ValueError("be_mode must be off, rr or after_partial")
+        for name in ("trail_atr_mult", "trend_ema_len", "min_retrace", "cost_r",
+                     "max_trades_per_day", "max_daily_loss_r"):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be >= 0")
+        if self.min_pullback_bars < 1:
+            raise ValueError("min_pullback_bars must be >= 1")
         unknown = set(self.enabled_setups) - {"sp2l", "btb"}
         if unknown:
             raise ValueError(f"unknown setups: {sorted(unknown)}")
@@ -113,6 +156,7 @@ class Setup:
     created_idx: int
     in_pullback: bool = False
     pullback_start_idx: Optional[int] = None
+    pullback_extreme: Optional[float] = None  # deepest pullback price so far
     level: Optional[float] = None  # BTB: the broken key level (retest target)
 
     @property
@@ -132,13 +176,22 @@ class Trade:
     target: float
     tag: str = "sp2l"
     size: float = 0.0
+    init_stop: Optional[float] = None  # stop at entry time (R anchor)
     scale_in_price: Optional[float] = None
     scaled_in: bool = False
+    partial_done: bool = False
+    be_done: bool = False
+    trailed: bool = False
+    realized_pnl: float = 0.0  # banked by the partial exit
     exit_idx: Optional[int] = None
     exit_ts: Optional[datetime] = None
     exit_price: Optional[float] = None
     exit_reason: str = ""
     pnl: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.init_stop is None:
+            self.init_stop = self.stop
 
     @property
     def is_open(self) -> bool:
@@ -146,7 +199,13 @@ class Trade:
 
     @property
     def risk_per_unit(self) -> float:
-        return abs(self.entry - self.stop)
+        return abs(self.entry - self.init_stop)
+
+    @property
+    def r_multiple(self) -> float:
+        """Trade result measured in R (initial risk units)."""
+        risk = self.risk_per_unit * self.size
+        return self.pnl / risk if risk > 0 else 0.0
 
 
 @dataclass
