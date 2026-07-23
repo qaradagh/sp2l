@@ -163,6 +163,7 @@ logTrade(int t, int d, float r) =>
             array.shift(dayRs)
             array.shift(dayNs)
             array.shift(dayWs)
+    0  // constant tail so the function has one consistent (ignored) return type
 
 // Today's closed-trade count and net R (for the daily risk guard).
 todayStats() =>
