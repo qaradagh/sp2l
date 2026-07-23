@@ -149,7 +149,10 @@ logTrade(int t, int d, float r) =>
         array.shift(tRs)
     int dayid = year(t) * 10000 + month(t) * 100 + dayofmonth(t)
     int n = array.size(dayIds)
-    if n > 0 and array.get(dayIds, n - 1) == dayid
+    bool sameDay = n > 0
+    if sameDay
+        sameDay := array.get(dayIds, n - 1) == dayid  // Pine `and` is not short-circuit
+    if sameDay
         array.set(dayRs, n - 1, array.get(dayRs, n - 1) + r)
         array.set(dayNs, n - 1, array.get(dayNs, n - 1) + 1)
         array.set(dayWs, n - 1, array.get(dayWs, n - 1) + (r > 0 ? 1 : 0))
@@ -171,9 +174,10 @@ todayStats() =>
     int n = 0
     float r = 0.0
     int sz = array.size(dayIds)
-    if sz > 0 and array.get(dayIds, sz - 1) == dayid
-        n := array.get(dayNs, sz - 1)
-        r := array.get(dayRs, sz - 1)
+    if sz > 0
+        if array.get(dayIds, sz - 1) == dayid
+            n := array.get(dayNs, sz - 1)
+            r := array.get(dayRs, sz - 1)
     [n, r]
 
 // ---------------------------------------------------------------- state
