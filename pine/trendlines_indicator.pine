@@ -1,0 +1,446 @@
+//@version=6
+// Auto Trendlines Pro — every trendline that can be drawn between swing pivots,
+// filtered down to the ones price actually respects.
+//
+// Pipeline:
+//   1. swing pivots with user-defined left/right candle counts (ta.pivothigh/low)
+//   2. every pivot pair becomes a candidate line, which then has to survive:
+//        * containment test — no candle may pierce the line between the anchors
+//        * touch test       — >= N pivots must sit on the line (ATR-scaled tolerance)
+//        * slope sanity     — no near-vertical lines
+//        * duplicate test   — near-identical lines are merged, strongest wins
+//   3. surviving lines are extended right and tracked for breaks and retests
+//
+// Non-repainting: pivots are confirmed `rightBars` candles late by construction and
+// all drawing/break logic runs on closed candles only.
+indicator("Auto Trendlines Pro [Swing Pivots]", "AutoTL", overlay = true,
+     max_lines_count = 500, max_labels_count = 500, max_bars_back = 1500)
+
+// ---------------------------------------------------------------- inputs
+grpPiv = "① Swing pivots"
+leftBars       = input.int(3, "Left candles", minval = 1, maxval = 100, inline = "lr", group = grpPiv,
+     tooltip = "A swing high must be higher than this many candles on its left and right (mirror image for swing lows). 3 = the classic setting, higher values keep only the major swings.")
+rightBars      = input.int(3, "Right candles", minval = 1, maxval = 100, inline = "lr", group = grpPiv)
+pivotDepth     = input.int(12, "Pair each new pivot with the last N pivots", minval = 2, maxval = 40, group = grpPiv,
+     tooltip = "How many older pivots a fresh pivot is allowed to connect to. Higher = more candidate lines, slower script.")
+maxNewPerPivot = input.int(3, "Max new lines per pivot", minval = 1, maxval = 8, group = grpPiv,
+     tooltip = "When several candidates pass, only the strongest ones (most touches, then longest) are drawn.")
+showPivots     = input.bool(false, "Mark swing points on the chart", group = grpPiv)
+
+grpTL = "② Trendline quality"
+useHighs     = input.bool(true, "Resistance lines (from swing highs)", group = grpTL)
+useLows      = input.bool(true, "Support lines (from swing lows)", group = grpTL)
+minTouches   = input.int(2, "Minimum touches", minval = 2, maxval = 8, group = grpTL,
+     tooltip = "2 = the two anchor pivots only. 3 or more means at least one extra pivot has to sit on the line — far more reliable, far fewer lines.")
+touchTolAtr  = input.float(0.25, "Touch tolerance (× ATR)", minval = 0.01, maxval = 3.0, step = 0.05, group = grpTL,
+     tooltip = "How close a pivot has to be to the line to count as a touch. Scaled by ATR so it adapts to volatility.")
+pierceTolAtr = input.float(0.15, "Allowed pierce depth (× ATR)", minval = 0.0, maxval = 3.0, step = 0.05, group = grpTL,
+     tooltip = "How far a candle may poke through the line before it counts as a pierce.")
+maxPierces   = input.int(0, "Max piercing candles between anchors", minval = 0, maxval = 20, group = grpTL,
+     tooltip = "0 = strict: price must stay fully below a resistance line (above a support line) between its two anchors.")
+minBarsApart = input.int(5, "Min candles between anchors", minval = 2, maxval = 200, group = grpTL)
+maxBarsApart = input.int(300, "Max candles between anchors", minval = 10, maxval = 1000, group = grpTL)
+maxSlopeAtr  = input.float(0.5, "Max slope (× ATR per candle, 0 = off)", minval = 0.0, step = 0.05, group = grpTL,
+     tooltip = "Rejects near-vertical lines, which are geometrically valid but useless for trading.")
+dirMode      = input.string("Any", "Allowed slope direction", options = ["Any", "Classic", "Reverse"], group = grpTL,
+     tooltip = "Classic = falling resistance / rising support. Reverse = the opposite side of a channel (rising resistance / falling support).")
+dedupTolAtr  = input.float(0.35, "Duplicate merge distance (× ATR)", minval = 0.0, step = 0.05, group = grpTL)
+requireLive  = input.bool(true, "Skip lines that are already broken when found", group = grpTL)
+atrLen       = input.int(14, "ATR length (tolerance scaling)", minval = 1, group = grpTL)
+
+grpBrk = "③ Breaks & retests"
+breakSrc     = input.string("Close", "Break confirmed by", options = ["Close", "Wick"], group = grpBrk)
+breakBufAtr  = input.float(0.05, "Break buffer (× ATR)", minval = 0.0, maxval = 2.0, step = 0.05, group = grpBrk)
+breakConfirm = input.int(1, "Confirmation candles", minval = 1, maxval = 10, group = grpBrk,
+     tooltip = "How many consecutive closed candles must stay beyond the line before it is called broken.")
+showBroken   = input.bool(true, "Keep broken lines on the chart", group = grpBrk)
+brokenKeep   = input.int(40, "…for this many candles", minval = 0, maxval = 500, group = grpBrk)
+flagRetest   = input.bool(true, "Flag retests of broken lines", group = grpBrk)
+
+grpVis = "④ Display"
+maxActive    = input.int(24, "Max lines kept alive", minval = 2, maxval = 200, group = grpVis)
+extendRight  = input.bool(true, "Extend lines to the right edge", group = grpVis)
+extendBars   = input.int(10, "…or extend by N candles (when the above is off)", minval = 0, maxval = 200, group = grpVis)
+widthByStr   = input.bool(true, "Line width follows touch count", group = grpVis)
+baseWidth    = input.int(1, "Base line width", minval = 1, maxval = 5, group = grpVis)
+lineStyleIn  = input.string("Solid", "Line style", options = ["Solid", "Dashed", "Dotted"], group = grpVis)
+showLabels   = input.bool(true, "Label lines with their touch count", group = grpVis)
+showBreakLbl = input.bool(true, "Label breaks and retests", group = grpVis)
+resColor     = input.color(#ef5350, "Resistance", inline = "c", group = grpVis)
+supColor     = input.color(#26a69a, "Support", inline = "c", group = grpVis)
+brkColor     = input.color(#787b86, "Broken", inline = "c", group = grpVis)
+
+grpTbl = "⑤ Dashboard"
+showTable = input.bool(true, "Show dashboard", group = grpTbl)
+tblRows   = input.int(6, "Lines listed", minval = 1, maxval = 15, group = grpTbl)
+tblPosIn  = input.string("Top right", "Position", options = ["Top right", "Top left", "Bottom right", "Bottom left", "Middle right"], group = grpTbl)
+
+// ---------------------------------------------------------------- state
+type TL
+    line  ln
+    label lb
+    label bl
+    int   dir       // 1 = resistance (built on highs), -1 = support (built on lows)
+    int   b1
+    float p1
+    int   b2
+    float p2
+    float slope
+    int   touches
+    bool  broken
+    int   brokeBar
+    int   beyond
+    bool  retested
+
+var array<TL>    tls = array.new<TL>()
+var array<float> phP = array.new_float()
+var array<int>   phB = array.new_int()
+var array<float> plP = array.new_float()
+var array<int>   plB = array.new_int()
+
+atrS  = ta.atr(atrLen)
+aNow  = math.max(nz(atrS, syminfo.mintick), syminfo.mintick)
+lnSty = lineStyleIn == "Dashed" ? line.style_dashed : lineStyleIn == "Dotted" ? line.style_dotted : line.style_solid
+
+// ---------------------------------------------------------------- helpers
+f_atrAt(int off) =>
+    int o = math.max(0, off)
+    math.max(nz(atrS[o], aNow), syminfo.mintick)
+
+f_y(float p1, int b1, float slope, int b) =>
+    p1 + slope * (b - b1)
+
+// True when no candle between the anchors pierces the line by more than the
+// allowed depth (more than `maxPierces` times).
+f_contained(int b1, float p1, float slope, int b2, int dir) =>
+    int pierces = 0
+    bool ok = true
+    if b2 - b1 >= 2
+        for b = b1 + 1 to b2 - 1
+            int off = bar_index - b
+            if off >= 0
+                float hv = high[off]
+                float lv = low[off]
+                if not na(hv) and not na(lv)
+                    float a = f_atrAt(off)
+                    float v = f_y(p1, b1, slope, b)
+                    float over = dir == 1 ? hv - (v + pierceTolAtr * a) : (v - pierceTolAtr * a) - lv
+                    if over > 0
+                        pierces += 1
+                        if pierces > maxPierces
+                            ok := false
+                            break
+    ok
+
+// Number of same-side pivots sitting on the line between the anchors
+// (the two anchors themselves always count).
+f_touches(array<float> ps, array<int> bs, int b1, float p1, float slope, int b2) =>
+    int cnt = 0
+    int n = array.size(bs)
+    if n > 0
+        for i = 0 to n - 1
+            int bp = array.get(bs, i)
+            if bp >= b1 and bp <= b2
+                int off = bar_index - bp
+                if off >= 0
+                    float v = f_y(p1, b1, slope, bp)
+                    if math.abs(array.get(ps, i) - v) <= touchTolAtr * f_atrAt(off)
+                        cnt += 1
+    cnt
+
+// Has the line already been broken between its second anchor and now?
+f_alreadyBroken(int b1, float p1, float slope, int b2, int dir) =>
+    bool brk = false
+    int startOff = bar_index - b2 - 1
+    if startOff >= 0
+        for off = startOff to 0
+            int b = bar_index - off
+            float a = f_atrAt(off)
+            float v = f_y(p1, b1, slope, b)
+            float buf = breakBufAtr * a
+            float src = breakSrc == "Close" ? close[off] : (dir == 1 ? high[off] : low[off])
+            if not na(src)
+                if dir == 1 ? src > v + buf : src < v - buf
+                    brk := true
+                    break
+    brk
+
+f_width(int touches) =>
+    widthByStr ? math.min(4, math.max(1, baseWidth + touches - minTouches)) : baseWidth
+
+f_dirOk(float slope, int dir) =>
+    dirMode == "Any" ? true :
+     dirMode == "Classic" ? (dir == 1 ? slope <= 0 : slope >= 0) : (dir == 1 ? slope >= 0 : slope <= 0)
+
+// True when the candidate sits on top of an existing line of the same side.
+// Returns the index of that line, or -1.
+f_dupIdx(int b1, float p1, float slope, int dir) =>
+    int found = -1
+    int n = array.size(tls)
+    float tol = dedupTolAtr * aNow
+    if n > 0
+        for i = 0 to n - 1
+            TL t = array.get(tls, i)
+            if t.dir == dir and not t.broken
+                float d1 = math.abs(f_y(t.p1, t.b1, t.slope, b1) - p1)
+                float d2 = math.abs(f_y(t.p1, t.b1, t.slope, bar_index) - f_y(p1, b1, slope, bar_index))
+                if d1 <= tol and d2 <= tol
+                    found := i
+                    break
+    found
+
+f_drop(int idx) =>
+    TL t = array.get(tls, idx)
+    if not na(t.ln)
+        line.delete(t.ln)
+    if not na(t.lb)
+        label.delete(t.lb)
+    if not na(t.bl)
+        label.delete(t.bl)
+    array.remove(tls, idx)
+
+f_rightX() =>
+    extendRight ? bar_index + 3 : bar_index + extendBars
+
+// ---------------------------------------------------------------- pivots
+float ph = ta.pivothigh(high, leftBars, rightBars)
+float pl = ta.pivotlow(low, leftBars, rightBars)
+
+keepPivots = math.max(pivotDepth * 3, 40)
+
+// ---------------------------------------------------------------- builder
+// Pairs the newest pivot (last element of the arrays) with the previous ones and
+// draws whatever survives the quality filters.
+f_build(array<float> ps, array<int> bs, int dir) =>
+    int n = array.size(bs)
+    int b2 = array.get(bs, n - 1)
+    float p2 = array.get(ps, n - 1)
+
+    array<int>   cB1 = array.new_int()
+    array<float> cP1 = array.new_float()
+    array<float> cSl = array.new_float()
+    array<int>   cTc = array.new_int()
+
+    int oldest = math.max(0, n - 1 - pivotDepth)
+    if n >= 2
+        for i = n - 2 to oldest
+            int b1 = array.get(bs, i)
+            float p1 = array.get(ps, i)
+            int span = b2 - b1
+            if span >= minBarsApart and span <= maxBarsApart
+                float slope = (p2 - p1) / span
+                bool slopeOk = maxSlopeAtr <= 0 or math.abs(slope) <= maxSlopeAtr * aNow
+                // `and` short-circuits in v6, so the expensive containment scan
+                // only runs once the cheap filters have passed
+                if slopeOk and f_dirOk(slope, dir) and f_contained(b1, p1, slope, b2, dir)
+                    int tc = f_touches(ps, bs, b1, p1, slope, b2)
+                    if tc >= minTouches and not (requireLive and f_alreadyBroken(b1, p1, slope, b2, dir))
+                        array.push(cB1, b1)
+                        array.push(cP1, p1)
+                        array.push(cSl, slope)
+                        array.push(cTc, tc)
+
+    // strongest first: most touches, ties broken by the longer line
+    int made = 0
+    while made < maxNewPerPivot and array.size(cB1) > 0
+        int best = 0
+        if array.size(cB1) > 1
+            for i = 1 to array.size(cB1) - 1
+                int tcB = array.get(cTc, best)
+                int tcI = array.get(cTc, i)
+                if tcI > tcB or (tcI == tcB and array.get(cB1, i) < array.get(cB1, best))
+                    best := i
+        int b1 = array.get(cB1, best)
+        float p1 = array.get(cP1, best)
+        float slope = array.get(cSl, best)
+        int tc = array.get(cTc, best)
+        array.remove(cB1, best)
+        array.remove(cP1, best)
+        array.remove(cSl, best)
+        array.remove(cTc, best)
+
+        int dup = f_dupIdx(b1, p1, slope, dir)
+        bool create = true
+        if dup >= 0
+            TL o = array.get(tls, dup)
+            if tc > o.touches or (tc == o.touches and b1 < o.b1)
+                f_drop(dup)
+            else
+                create := false
+        if create
+            color col = dir == 1 ? resColor : supColor
+            line ln = line.new(b1, p1, b2, p2, xloc = xloc.bar_index, color = col,
+                 width = f_width(tc), style = lnSty, extend = extendRight ? extend.right : extend.none)
+            label lb = na
+            if showLabels
+                lb := label.new(f_rightX(), f_y(p1, b1, slope, f_rightX()),
+                     (dir == 1 ? "R" : "S") + " ×" + str.tostring(tc),
+                     xloc = xloc.bar_index, style = label.style_label_left,
+                     color = color.new(col, 80), textcolor = col, size = size.tiny)
+            array.push(tls, TL.new(ln = ln, lb = lb, bl = na, dir = dir, b1 = b1, p1 = p1,
+                 b2 = b2, p2 = p2, slope = slope, touches = tc, broken = false,
+                 brokeBar = na, beyond = 0, retested = false))
+            made += 1
+    made
+
+// ---------------------------------------------------------------- register pivots
+if barstate.isconfirmed
+    if not na(ph)
+        array.push(phP, ph)
+        array.push(phB, bar_index - rightBars)
+        if array.size(phB) > keepPivots
+            array.shift(phP)
+            array.shift(phB)
+        if useHighs
+            f_build(phP, phB, 1)
+    if not na(pl)
+        array.push(plP, pl)
+        array.push(plB, bar_index - rightBars)
+        if array.size(plB) > keepPivots
+            array.shift(plP)
+            array.shift(plB)
+        if useLows
+            f_build(plP, plB, -1)
+
+// ---------------------------------------------------------------- maintain
+bool brkUp   = false
+bool brkDn   = false
+bool touched = false
+bool retest  = false
+
+if array.size(tls) > 0
+    for i = array.size(tls) - 1 to 0
+        TL t = array.get(tls, i)
+        float v = f_y(t.p1, t.b1, t.slope, bar_index)
+        float buf = breakBufAtr * aNow
+        float tol = touchTolAtr * aNow
+
+        if not t.broken
+            // keep the visible right end glued to the current candle
+            if not extendRight
+                int rx = bar_index + extendBars
+                line.set_xy2(t.ln, rx, f_y(t.p1, t.b1, t.slope, rx))
+            if not na(t.lb)
+                label.set_xy(t.lb, f_rightX(), f_y(t.p1, t.b1, t.slope, f_rightX()))
+
+            if high >= v - tol and low <= v + tol
+                touched := true
+
+            if barstate.isconfirmed and bar_index > t.b2
+                float src = breakSrc == "Close" ? close : (t.dir == 1 ? high : low)
+                bool beyondNow = t.dir == 1 ? src > v + buf : src < v - buf
+                t.beyond := beyondNow ? t.beyond + 1 : 0
+                if t.beyond >= breakConfirm
+                    t.broken := true
+                    t.brokeBar := bar_index
+                    if t.dir == 1
+                        brkUp := true
+                    else
+                        brkDn := true
+                    line.set_extend(t.ln, extend.none)
+                    line.set_xy2(t.ln, bar_index, v)
+                    line.set_color(t.ln, brkColor)
+                    line.set_style(t.ln, line.style_dashed)
+                    if not na(t.lb)
+                        label.delete(t.lb)
+                        t.lb := na
+                    if showBreakLbl
+                        t.bl := label.new(bar_index, v, "B", xloc = xloc.bar_index,
+                             style = t.dir == 1 ? label.style_label_down : label.style_label_up,
+                             color = color.new(t.dir == 1 ? resColor : supColor, 25),
+                             textcolor = color.white, size = size.tiny)
+        else
+            if not showBroken or (brokenKeep > 0 and bar_index - t.brokeBar > brokenKeep)
+                f_drop(i)
+                continue
+            if flagRetest and not t.retested and barstate.isconfirmed and bar_index > t.brokeBar
+                bool back = t.dir == 1 ? (low <= v + tol and close >= v - tol) : (high >= v - tol and close <= v + tol)
+                if back
+                    t.retested := true
+                    retest := true
+                    line.set_xy2(t.ln, bar_index, v)
+                    if showBreakLbl
+                        if not na(t.bl)
+                            label.delete(t.bl)
+                        t.bl := label.new(bar_index, v, "RT", xloc = xloc.bar_index,
+                             style = t.dir == 1 ? label.style_label_up : label.style_label_down,
+                             color = color.new(color.orange, 25), textcolor = color.white, size = size.tiny)
+
+// hard cap — sacrifice broken lines first, then the weakest ones
+while array.size(tls) > maxActive
+    int worst = 0
+    for i = 1 to array.size(tls) - 1
+        TL wa = array.get(tls, worst)
+        TL wb = array.get(tls, i)
+        int sa = (wa.broken ? -100 : 0) + wa.touches
+        int sb = (wb.broken ? -100 : 0) + wb.touches
+        if sb < sa or (sb == sa and wb.b1 > wa.b1)
+            worst := i
+    f_drop(worst)
+
+// ---------------------------------------------------------------- pivot markers
+plotchar(showPivots ? ph : na, "Swing high", "▾", location.absolute, resColor, offset = -rightBars, size = size.tiny)
+plotchar(showPivots ? pl : na, "Swing low",  "▴", location.absolute, supColor, offset = -rightBars, size = size.tiny)
+
+// ---------------------------------------------------------------- dashboard
+tblPos = tblPosIn == "Top right" ? position.top_right :
+     tblPosIn == "Top left" ? position.top_left :
+     tblPosIn == "Bottom right" ? position.bottom_right :
+     tblPosIn == "Bottom left" ? position.bottom_left : position.middle_right
+
+var table dash = table.new(tblPos, 5, tblRows + 2, border_width = 1, frame_width = 1,
+     frame_color = color.new(color.gray, 50), border_color = color.new(color.gray, 70))
+
+if showTable and barstate.islast
+    table.clear(dash, 0, 0, 4, tblRows + 1)
+
+    int live = 0
+    if array.size(tls) > 0
+        for i = 0 to array.size(tls) - 1
+            TL ti = array.get(tls, i)
+            if not ti.broken
+                live += 1
+    table.cell(dash, 0, 0, "Auto Trendlines", text_color = color.white, text_size = size.small, bgcolor = color.new(color.gray, 60))
+    table.cell(dash, 1, 0, str.tostring(live) + " live", text_color = color.white, text_size = size.small, bgcolor = color.new(color.gray, 60))
+    table.cell(dash, 2, 0, "pivot " + str.tostring(leftBars) + "/" + str.tostring(rightBars), text_color = color.silver, text_size = size.tiny, bgcolor = color.new(color.gray, 60))
+    table.cell(dash, 3, 0, "min " + str.tostring(minTouches) + "T", text_color = color.silver, text_size = size.tiny, bgcolor = color.new(color.gray, 60))
+    table.cell(dash, 4, 0, "ATR " + str.tostring(aNow, format.mintick), text_color = color.silver, text_size = size.tiny, bgcolor = color.new(color.gray, 60))
+
+    table.cell(dash, 0, 1, "Side",  text_color = color.silver, text_size = size.tiny)
+    table.cell(dash, 1, 1, "Price", text_color = color.silver, text_size = size.tiny)
+    table.cell(dash, 2, 1, "Dist",  text_color = color.silver, text_size = size.tiny)
+    table.cell(dash, 3, 1, "T",     text_color = color.silver, text_size = size.tiny)
+    table.cell(dash, 4, 1, "Slope", text_color = color.silver, text_size = size.tiny)
+
+    // list the nearest live lines, closest first
+    array<int> used = array.new_int()
+    int row = 2
+    while row < tblRows + 2 and array.size(tls) > 0
+        int pick = -1
+        float bestD = 1e20
+        for i = 0 to array.size(tls) - 1
+            TL ti = array.get(tls, i)
+            if not ti.broken and array.indexof(used, i) < 0
+                float d = math.abs(f_y(ti.p1, ti.b1, ti.slope, bar_index) - close)
+                if d < bestD
+                    bestD := d
+                    pick := i
+        if pick < 0
+            break
+        array.push(used, pick)
+        TL tp = array.get(tls, pick)
+        float v = f_y(tp.p1, tp.b1, tp.slope, bar_index)
+        color col = tp.dir == 1 ? resColor : supColor
+        table.cell(dash, 0, row, tp.dir == 1 ? "▲ Res" : "▼ Sup", text_color = col, text_size = size.tiny)
+        table.cell(dash, 1, row, str.tostring(v, format.mintick), text_color = color.white, text_size = size.tiny)
+        table.cell(dash, 2, row, str.tostring((v - close) / aNow, "#.##") + "A", text_color = color.silver, text_size = size.tiny)
+        table.cell(dash, 3, row, str.tostring(tp.touches), text_color = color.white, text_size = size.tiny)
+        table.cell(dash, 4, row, tp.slope > 0 ? "↗" : tp.slope < 0 ? "↘" : "→", text_color = col, text_size = size.tiny)
+        row += 1
+
+// ---------------------------------------------------------------- alerts
+alertcondition(brkUp,   "Resistance broken", "Auto Trendlines: a resistance trendline was broken upwards")
+alertcondition(brkDn,   "Support broken",    "Auto Trendlines: a support trendline was broken downwards")
+alertcondition(brkUp or brkDn, "Any break",  "Auto Trendlines: a trendline was broken")
+alertcondition(touched, "Trendline test",    "Auto Trendlines: price is testing a live trendline")
+alertcondition(retest,  "Break retest",      "Auto Trendlines: price came back to retest a broken trendline")
