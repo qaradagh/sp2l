@@ -38,7 +38,6 @@ beTrigRR   = input.float(1.0,  "BE trigger (R)", minval = 0.1, step = 0.1, group
 beOffsetR  = input.float(0.0,  "BE offset (R locked)", minval = -1.0, maxval = 1.0, step = 0.05, group = grpMgmt)
 
 grpFlt = "Filters & risk guards"
-emaLen       = input.int(0,     "Trend EMA length (0 = off)", minval = 0, group = grpFlt)
 trailMult    = input.float(0.0, "ATR trailing stop (x ATR, 0 = off)", minval = 0.0, step = 0.5, group = grpFlt)
 costR        = input.float(0.0, "Cost per trade (R)", minval = 0.0, step = 0.01, group = grpFlt)
 maxTradesDay = input.int(0,     "Max trades per day (0 = off)", minval = 0, group = grpFlt)
@@ -91,9 +90,6 @@ strongBull = close > open and bodyRatio >= minBodyRatio and not isDoji
 strongBear = close < open and bodyRatio >= minBodyRatio and not isDoji
 atrVal     = ta.atr(atrLen)
 inSession  = not useSession or not na(time(timeframe.period, sess))
-emaVal     = ta.ema(close, math.max(emaLen, 1))
-trendOkLong  = emaLen == 0 or close > emaVal
-trendOkShort = emaLen == 0 or close < emaVal
 
 sbN = strongBull ? 1 : 0
 ssN = strongBear ? 1 : 0
@@ -416,13 +412,11 @@ if dir != 0 and inPull and bar_index > pullStart
         spikeBox := na
 
 // ------------------------------------------- 3) adopt a fresh spike when idle
-bool adoptBull = okBull and trendOkLong
-bool adoptBear = okBear and trendOkShort
-if dir == 0 and (adoptBull or adoptBear)
-    dir := adoptBull ? 1 : -1
-    pointA := adoptBull ? aBull : aBear
-    pointB := adoptBull ? bBull : bBear
-    int runSel = adoptBull ? runBull : runBear
+if dir == 0 and (okBull or okBear)
+    dir := okBull ? 1 : -1
+    pointA := okBull ? aBull : aBear
+    pointB := okBull ? bBull : bBear
+    int runSel = okBull ? runBull : runBear
     spikeEnd := bar_index
     int startIdx = bar_index - runSel + 1
     if showLevels and drawOK
@@ -540,7 +534,6 @@ if tDir != 0
 
 plotshape(longFire,  "Long signal",  shape.triangleup,   location.belowbar, color = bullColor, size = size.tiny)
 plotshape(shortFire, "Short signal", shape.triangledown, location.abovebar, color = bearColor, size = size.tiny)
-plot(emaLen > 0 ? emaVal : na, "Trend EMA", color = color.new(color.yellow, 30), linewidth = 2)
 
 // ---------------------------------------------------------------- status table
 var table tbl = table.new(position.top_right, 2, 5, bgcolor = color.new(color.black, 35), border_width = 1, border_color = color.new(color.gray, 60))

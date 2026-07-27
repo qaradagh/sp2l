@@ -55,8 +55,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--daily", action="store_true", help="print the per-day report")
     p.add_argument("--trail-atr", type=float, default=0.0,
                    help="ATR trailing stop multiplier (0 = off)")
-    p.add_argument("--trend-ema", type=int, default=0,
-                   help="trend filter EMA length: long above / short below (0 = off)")
     p.add_argument("--min-pullback-bars", type=int, default=1,
                    help="SP2L: min bars between pullback start and breakout")
     p.add_argument("--min-retrace", type=float, default=0.0,
@@ -109,7 +107,6 @@ def main(argv=None) -> int:
         be_trigger_rr=args.be_trigger_rr,
         be_offset_r=args.be_offset_r,
         trail_atr_mult=args.trail_atr,
-        trend_ema_len=args.trend_ema,
         min_pullback_bars=args.min_pullback_bars,
         min_retrace=args.min_retrace,
         cost_r=args.cost_r,

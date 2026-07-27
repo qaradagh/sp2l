@@ -36,20 +36,6 @@ FLOW = [
 WIN = [(103.4, 107.0, 103.3, 106.9)]  # reaches 1R target 106.15
 
 
-class TestTrendFilter:
-    # Flat bars far above the spike price keep the EMA high, so a long
-    # spike at ~100 sits below trend.
-    HIGH_RANGE = [(200.0, 200.6, 199.4, 200.1), (200.1, 200.7, 199.5, 200.0)] * 15
-
-    def test_long_below_ema_blocked(self):
-        result = Backtester(cfg(trend_ema_len=20)).run(mk_bars(self.HIGH_RANGE + FLOW + WIN))
-        assert result.total_trades == 0
-
-    def test_disabled_filter_allows_trade(self):
-        result = Backtester(cfg(trend_ema_len=0)).run(mk_bars(self.HIGH_RANGE + FLOW + WIN))
-        assert result.total_trades == 1
-
-
 class TestTrailingStop:
     def test_trail_locks_profit(self):
         # Far target keeps the trade open; the rally drags the trail up and

@@ -82,9 +82,6 @@ class Config:
     # tightening the stop.
     trail_atr_mult: float = 0.0
 
-    # Trend filter: only long above / short below an EMA of closes (0 = off).
-    trend_ema_len: int = 0
-
     # SP2L pullback quality: minimum bars between pullback start and breakout,
     # and minimum pullback depth as a fraction of the spike (0 = off).
     min_pullback_bars: int = 1
@@ -133,7 +130,7 @@ class Config:
             raise ValueError("partial_pct must be in (0, 1)")
         if self.be_mode not in ("off", "rr", "after_partial"):
             raise ValueError("be_mode must be off, rr or after_partial")
-        for name in ("trail_atr_mult", "trend_ema_len", "min_retrace", "cost_r",
+        for name in ("trail_atr_mult", "min_retrace", "cost_r",
                      "max_trades_per_day", "max_daily_loss_r"):
             if getattr(self, name) < 0:
                 raise ValueError(f"{name} must be >= 0")

@@ -46,10 +46,9 @@ class SpikeDetectorBase:
         self.cfg.validate()
         self._bars: List[Bar] = []
         self._trs: List[float] = []
-        self._ema: Optional[float] = None
 
     def _append_bar(self, bar: Bar) -> int:
-        """Track the bar, its true range and the trend EMA; returns the index."""
+        """Track the bar and its true range; returns the bar index."""
         self._bars.append(bar)
         idx = len(self._bars) - 1
         if idx == 0:
@@ -59,18 +58,7 @@ class SpikeDetectorBase:
             self._trs.append(
                 max(bar.high - bar.low, abs(bar.high - prev_close), abs(bar.low - prev_close))
             )
-        if self.cfg.trend_ema_len > 0:
-            if self._ema is None:
-                self._ema = bar.close
-            else:
-                alpha = 2.0 / (self.cfg.trend_ema_len + 1)
-                self._ema += alpha * (bar.close - self._ema)
         return idx
-
-    def _trend_ok(self, direction: Direction, bar: Bar) -> bool:
-        if self.cfg.trend_ema_len <= 0 or self._ema is None:
-            return True
-        return bar.close > self._ema if direction is Direction.LONG else bar.close < self._ema
 
     # ------------------------------------------------------------------ utils
 
@@ -163,8 +151,6 @@ class SpikeDetectorBase:
         for direction in (Direction.LONG, Direction.SHORT):
             start = self._find_spike_run(idx, direction)
             if start is None:
-                continue
-            if not self._trend_ok(direction, self._bars[idx]):
                 continue
             if not self._has_gap(start, idx, direction):
                 continue
