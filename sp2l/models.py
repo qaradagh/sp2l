@@ -82,9 +82,6 @@ class Config:
     # tightening the stop.
     trail_atr_mult: float = 0.0
 
-    # Trend filter: only long above / short below an EMA of closes (0 = off).
-    trend_ema_len: int = 0
-
     # SP2L pullback quality: minimum bars between pullback start and breakout,
     # and minimum pullback depth as a fraction of the spike (0 = off).
     min_pullback_bars: int = 1
@@ -97,6 +94,18 @@ class Config:
     # once the day's net R hits -max_daily_loss_r (0 = off).
     max_trades_per_day: int = 0
     max_daily_loss_r: float = 0.0
+
+    # Take every signal even while already in a trade / holding a pending
+    # order (disables the "skip because in trade" rule).
+    allow_concurrent: bool = False
+
+    # SP2L entry order type:
+    #   "market" - fill at the breakout of B immediately (always activates)
+    #   "limit"  - rest a limit at B; the trade only activates if price pulls
+    #              back to B within limit_wait_bars, else the order is cancelled
+    #              (never becomes a trade).
+    entry_mode: str = "market"
+    limit_wait_bars: int = 10
 
     # Session filter (UTC)
     session_filter: bool = False
@@ -133,7 +142,11 @@ class Config:
             raise ValueError("partial_pct must be in (0, 1)")
         if self.be_mode not in ("off", "rr", "after_partial"):
             raise ValueError("be_mode must be off, rr or after_partial")
-        for name in ("trail_atr_mult", "trend_ema_len", "min_retrace", "cost_r",
+        if self.entry_mode not in ("market", "limit"):
+            raise ValueError("entry_mode must be market or limit")
+        if self.limit_wait_bars < 1:
+            raise ValueError("limit_wait_bars must be >= 1")
+        for name in ("trail_atr_mult", "min_retrace", "cost_r",
                      "max_trades_per_day", "max_daily_loss_r"):
             if getattr(self, name) < 0:
                 raise ValueError(f"{name} must be >= 0")
@@ -217,4 +230,5 @@ class Signal:
     stop: float
     target: float
     tag: str = "sp2l"
+    entry_type: str = "market"  # "market" fills now; "limit" rests at `entry`
     setup: Setup = field(repr=False, default=None)

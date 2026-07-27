@@ -28,6 +28,7 @@ class BacktestResult:
     trades: List[Trade]
     equity_curve: List[float]
     config: Config
+    cancelled_limits: int = 0  # limit orders that expired without filling
 
     @property
     def closed(self) -> List[Trade]:
@@ -124,6 +125,8 @@ class BacktestResult:
             if self.equity_curve
             else "Final equity    : n/a",
         ]
+        if self.cancelled_limits:
+            lines.append(f"Limits unfilled : {self.cancelled_limits}")
         groups = self.by_tag()
         if len(groups) > 1:
             lines.append("Per setup:")
@@ -151,7 +154,9 @@ class Backtester:
         equity = cfg.initial_equity
         trades: List[Trade] = []
         equity_curve: List[float] = []
-        open_trade: Optional[Trade] = None
+        open_trades: List[Trade] = []
+        pending: List[dict] = []  # resting limit orders awaiting a fill
+        cancelled_limits = 0
 
         # Rolling ATR for the trailing stop.
         trs = true_ranges(bars)
@@ -165,68 +170,92 @@ class Backtester:
         day_r = 0.0
         day_trades = 0
 
+        def open_trade(direction, entry, stop, target, tag, idx, bar):
+            nonlocal equity, day_r, day_trades
+            per_unit = abs(entry - stop)
+            if per_unit <= 0:
+                return
+            trade = Trade(
+                direction=direction, entry_idx=idx, entry_ts=bar.ts,
+                entry=entry, stop=stop, target=target, tag=tag,
+                size=equity * cfg.risk_per_trade / per_unit,
+            )
+            if cfg.scale_in:
+                trade.scale_in_price = entry - 0.5 * (entry - stop)
+            trades.append(trade)
+            open_trades.append(trade)
+            day_trades += 1
+            # The entry bar itself may already reach SL or TP; partial/BE
+            # management starts on the next bar.
+            if self._check_exit(trade, bar, idx, manage=False):
+                equity += trade.pnl
+                day_r += trade.r_multiple
+                open_trades.remove(trade)
+
         for idx, bar in enumerate(bars):
             if bar.ts.date() != cur_day:
                 cur_day = bar.ts.date()
                 day_r = 0.0
                 day_trades = 0
 
-            # Manage the open position first (exits before new entries).
-            if open_trade is not None:
-                self._maybe_scale_in(open_trade, bar)
-                exited = self._check_exit(open_trade, bar, idx, atr_val=atr[idx])
-                if exited:
-                    equity += open_trade.pnl
-                    day_r += open_trade.r_multiple
-                    open_trade = None
+            # 1) manage open positions (exits before any new entry)
+            for trade in list(open_trades):
+                self._maybe_scale_in(trade, bar)
+                if self._check_exit(trade, bar, idx, atr_val=atr[idx]):
+                    equity += trade.pnl
+                    day_r += trade.r_multiple
+                    open_trades.remove(trade)
 
-            # Every strategy sees every bar so their states stay current.
+            # 2) fill or cancel resting limit orders placed on earlier bars
+            for order in list(pending):
+                filled = (
+                    bar.low <= order["entry"] if order["direction"] is Direction.LONG
+                    else bar.high >= order["entry"]
+                )
+                if filled:
+                    pending.remove(order)
+                    open_trade(order["direction"], order["entry"], order["stop"],
+                               order["target"], order["tag"], idx, bar)
+                elif idx - order["idx"] >= cfg.limit_wait_bars:
+                    pending.remove(order)
+                    cancelled_limits += 1
+
+            # 3) new signals (every strategy sees every bar to stay current)
             signals = [s for s in (st.on_bar(bar) for st in strategies) if s]
-            signal = signals[0] if signals else None
-
-            guard_blocked = (
-                (cfg.max_trades_per_day > 0 and day_trades >= cfg.max_trades_per_day)
-                or (cfg.max_daily_loss_r > 0 and day_r <= -cfg.max_daily_loss_r)
-            )
-
-            if signal is not None and open_trade is None and not guard_blocked:
-                risk_amount = equity * cfg.risk_per_trade
-                per_unit = abs(signal.entry - signal.stop)
-                if per_unit > 0:
-                    trade = Trade(
-                        direction=signal.direction,
-                        entry_idx=idx,
-                        entry_ts=bar.ts,
-                        entry=signal.entry,
-                        stop=signal.stop,
-                        target=signal.target,
-                        tag=signal.tag,
-                        size=risk_amount / per_unit,
-                    )
-                    if cfg.scale_in:
-                        half = 0.5 * (signal.entry - signal.stop)
-                        trade.scale_in_price = signal.entry - half
-                    trades.append(trade)
-                    open_trade = trade
-                    day_trades += 1
-                    # The signal bar itself may already reach SL or TP;
-                    # partial/BE management starts on the next bar.
-                    exited = self._check_exit(open_trade, bar, idx, manage=False)
-                    if exited:
-                        equity += open_trade.pnl
-                        day_r += open_trade.r_multiple
-                        open_trade = None
+            for signal in signals:
+                guard_blocked = (
+                    (cfg.max_trades_per_day > 0 and day_trades >= cfg.max_trades_per_day)
+                    or (cfg.max_daily_loss_r > 0 and day_r <= -cfg.max_daily_loss_r)
+                )
+                if guard_blocked:
+                    continue
+                # "flat" means no open trade AND no resting order.
+                if (open_trades or pending) and not cfg.allow_concurrent:
+                    continue
+                if signal.entry_type == "limit":
+                    pending.append(dict(
+                        direction=signal.direction, entry=signal.entry,
+                        stop=signal.stop, target=signal.target, tag=signal.tag, idx=idx,
+                    ))
+                else:
+                    open_trade(signal.direction, signal.entry, signal.stop,
+                               signal.target, signal.tag, idx, bar)
 
             equity_curve.append(equity)
 
-        # Mark-to-market close of any position left open at the end.
-        if open_trade is not None and bars:
+        # Mark-to-market close of anything still open at the end.
+        if bars:
             last = bars[-1]
-            self._close(open_trade, len(bars) - 1, last, last.close, "eod")
-            equity += open_trade.pnl
+            for trade in list(open_trades):
+                self._close(trade, len(bars) - 1, last, last.close, "eod")
+                equity += trade.pnl
             equity_curve[-1] = equity
+            cancelled_limits += len(pending)  # never filled by the last bar
 
-        return BacktestResult(trades=trades, equity_curve=equity_curve, config=cfg)
+        return BacktestResult(
+            trades=trades, equity_curve=equity_curve, config=cfg,
+            cancelled_limits=cancelled_limits,
+        )
 
     # ------------------------------------------------------------------ fills
 
