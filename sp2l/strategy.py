@@ -220,16 +220,20 @@ class SP2LStrategy(SpikeDetectorBase):
         bar = self._bars[idx]
         cfg = self.cfg
         buffer = s.spike_len * cfg.sl_buffer_pct
+        limit = cfg.entry_mode == "limit"
+        etype = "limit" if limit else "market"
         if s.direction is Direction.LONG and bar.high > s.point_b:
-            entry = max(s.point_b, bar.open)  # gap-open fills at open
+            # market: fill at the breakout (gap-open fills at open); limit:
+            # rest at B and let the backtester wait for a pullback fill.
+            entry = s.point_b if limit else max(s.point_b, bar.open)
             stop = s.point_a - buffer
             target = entry + cfg.rr * (entry - stop)
-            return Signal(Direction.LONG, entry, stop, target, setup=s)
+            return Signal(Direction.LONG, entry, stop, target, entry_type=etype, setup=s)
         if s.direction is Direction.SHORT and bar.low < s.point_b:
-            entry = min(s.point_b, bar.open)
+            entry = s.point_b if limit else min(s.point_b, bar.open)
             stop = s.point_a + buffer
             target = entry - cfg.rr * (stop - entry)
-            return Signal(Direction.SHORT, entry, stop, target, setup=s)
+            return Signal(Direction.SHORT, entry, stop, target, entry_type=etype, setup=s)
         return None
 
     def _reset(self) -> None:
