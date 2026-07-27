@@ -99,11 +99,21 @@ class Config:
     # order (disables the "skip because in trade" rule).
     allow_concurrent: bool = False
 
-    # SP2L entry order type:
-    #   "market" - fill at the breakout of B immediately (always activates)
-    #   "limit"  - rest a limit at B; the trade only activates if price pulls
-    #              back to B within limit_wait_bars, else the order is cancelled
-    #              (never becomes a trade).
+    # SP2L entry trigger. The four supported combinations are:
+    #   break_confirm="touch", entry_mode="market" -> option 1
+    #   break_confirm="touch", entry_mode="limit"  -> option 2
+    #   break_confirm="close", entry_mode="market" -> option 3 (default)
+    #   break_confirm="close", entry_mode="limit"  -> option 4
+    #
+    # break_confirm: how the break of level B counts
+    #   "touch" - any trade through B (shadow or close)
+    #   "close" - the bar must close beyond B
+    # entry_mode: how we enter once the break is confirmed
+    #   "market" - market order filled at the OPEN of the next bar
+    #   "limit"  - a limit resting at B; only activates if price returns to B
+    #              within limit_wait_bars, otherwise the order is cancelled
+    #              and never becomes a trade
+    break_confirm: str = "close"
     entry_mode: str = "market"
     limit_wait_bars: int = 10
 
@@ -144,6 +154,8 @@ class Config:
             raise ValueError("be_mode must be off, rr or after_partial")
         if self.entry_mode not in ("market", "limit"):
             raise ValueError("entry_mode must be market or limit")
+        if self.break_confirm not in ("touch", "close"):
+            raise ValueError("break_confirm must be touch or close")
         if self.limit_wait_bars < 1:
             raise ValueError("limit_wait_bars must be >= 1")
         for name in ("trail_atr_mult", "min_retrace", "cost_r",
@@ -223,12 +235,19 @@ class Trade:
 
 @dataclass
 class Signal:
-    """Emitted by the strategy when a breakout entry triggers."""
+    """Emitted by a strategy when an entry triggers.
+
+    entry_type decides how the backtester turns this into a trade:
+      "now"       - fill immediately at `entry` on the signal bar
+      "next_open" - fill at the OPEN of the next bar (entry/target recomputed)
+      "limit"     - rest a limit at `entry`; fill only if price returns to it
+    """
 
     direction: Direction
     entry: float
     stop: float
     target: float
     tag: str = "sp2l"
-    entry_type: str = "market"  # "market" fills now; "limit" rests at `entry`
+    entry_type: str = "now"
+    rr: float = 1.0  # lets the backtester recompute the target after a fill
     setup: Setup = field(repr=False, default=None)

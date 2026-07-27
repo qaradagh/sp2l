@@ -216,25 +216,33 @@ class SP2LStrategy(SpikeDetectorBase):
         return bar.high > prev.high or bar.close > bar.open
 
     def _breakout_signal(self, idx: int) -> Optional[Signal]:
+        """The break of level B, confirmed per cfg.break_confirm.
+
+        Neither entry mode fills on the breakout bar itself: "market" fills at
+        the next bar's open, "limit" rests at B waiting for a return.
+        """
         s = self.setup
         bar = self._bars[idx]
         cfg = self.cfg
         buffer = s.spike_len * cfg.sl_buffer_pct
-        limit = cfg.entry_mode == "limit"
-        etype = "limit" if limit else "market"
-        if s.direction is Direction.LONG and bar.high > s.point_b:
-            # market: fill at the breakout (gap-open fills at open); limit:
-            # rest at B and let the backtester wait for a pullback fill.
-            entry = s.point_b if limit else max(s.point_b, bar.open)
+        etype = "limit" if cfg.entry_mode == "limit" else "next_open"
+        if s.direction is Direction.LONG:
+            broke = bar.close > s.point_b if cfg.break_confirm == "close" else bar.high > s.point_b
+            if not broke:
+                return None
             stop = s.point_a - buffer
-            target = entry + cfg.rr * (entry - stop)
-            return Signal(Direction.LONG, entry, stop, target, entry_type=etype, setup=s)
-        if s.direction is Direction.SHORT and bar.low < s.point_b:
-            entry = s.point_b if limit else min(s.point_b, bar.open)
-            stop = s.point_a + buffer
-            target = entry - cfg.rr * (stop - entry)
-            return Signal(Direction.SHORT, entry, stop, target, entry_type=etype, setup=s)
-        return None
+            # For "next_open" the backtester recomputes entry/target on the
+            # fill; point_b is the reference (and the exact price for limits).
+            target = s.point_b + cfg.rr * (s.point_b - stop)
+            return Signal(Direction.LONG, s.point_b, stop, target,
+                          entry_type=etype, rr=cfg.rr, setup=s)
+        broke = bar.close < s.point_b if cfg.break_confirm == "close" else bar.low < s.point_b
+        if not broke:
+            return None
+        stop = s.point_a + buffer
+        target = s.point_b - cfg.rr * (stop - s.point_b)
+        return Signal(Direction.SHORT, s.point_b, stop, target,
+                      entry_type=etype, rr=cfg.rr, setup=s)
 
     def _reset(self) -> None:
         self.state = State.IDLE

@@ -127,7 +127,8 @@ class TestCombined:
 
     def test_sp2l_still_fires_when_no_level(self):
         # The classic SP2L flow (spike at bar 0, shallow pullback, breakout):
-        # BTB has no prior range, SP2L takes the trade.
+        # BTB has no prior range, SP2L takes the trade. The last bar is the
+        # market fill bar (entry = its open).
         bars = mk_bars(
             [
                 (100.0, 101.05, 99.95, 101.0),
@@ -135,6 +136,7 @@ class TestCombined:
                 (102.0, 103.05, 101.95, 103.0),
                 (103.0, 103.02, 102.4, 102.5),
                 (102.5, 103.5, 102.4, 103.4),
+                (103.05, 103.15, 102.95, 103.10),
             ]
         )
         result = Backtester(cfg()).run(bars)

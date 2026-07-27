@@ -30,6 +30,9 @@ SPIKE3 = [
 ]
 PULLBACK = [(103.0, 103.02, 102.4, 102.5)]
 BREAKOUT = [(102.5, 103.5, 102.4, 103.4)]
+# Market entries fill at the OPEN of the bar after the confirmed break; this
+# bar opens exactly at B (103.05) so the R maths below stays round.
+FILL = [(103.05, 103.15, 102.95, 103.10)]
 
 
 class TestTradeFlow:
@@ -39,7 +42,7 @@ class TestTradeFlow:
             (103.4, 105.0, 103.3, 104.9),
             (104.9, 106.5, 104.8, 106.3),
         ]
-        result = Backtester(cfg()).run(mk_bars(SPIKE3 + PULLBACK + BREAKOUT + rally))
+        result = Backtester(cfg()).run(mk_bars(SPIKE3 + PULLBACK + BREAKOUT + FILL + rally))
         assert result.total_trades == 1
         t = result.closed[0]
         assert t.exit_reason == "target"
@@ -53,7 +56,7 @@ class TestTradeFlow:
             (103.4, 103.45, 101.0, 101.1),
             (101.1, 101.2, 99.5, 99.6),  # through SL at 99.95
         ]
-        result = Backtester(cfg()).run(mk_bars(SPIKE3 + PULLBACK + BREAKOUT + dump))
+        result = Backtester(cfg()).run(mk_bars(SPIKE3 + PULLBACK + BREAKOUT + FILL + dump))
         assert result.total_trades == 1
         t = result.closed[0]
         assert t.exit_reason == "stop"
@@ -62,17 +65,17 @@ class TestTradeFlow:
     def test_same_bar_sl_and_tp_counts_stop_first(self):
         # One huge bar sweeps both SL and TP after entry: conservative = stop.
         sweep = [(103.4, 107.0, 99.0, 100.0)]
-        result = Backtester(cfg()).run(mk_bars(SPIKE3 + PULLBACK + BREAKOUT + sweep))
+        result = Backtester(cfg()).run(mk_bars(SPIKE3 + PULLBACK + BREAKOUT + FILL + sweep))
         assert result.total_trades == 1
         assert result.closed[0].exit_reason == "stop"
 
     def test_open_trade_closed_at_end(self):
-        result = Backtester(cfg()).run(mk_bars(SPIKE3 + PULLBACK + BREAKOUT))
+        result = Backtester(cfg()).run(mk_bars(SPIKE3 + PULLBACK + BREAKOUT + FILL))
         assert result.total_trades == 1
         assert result.closed[0].exit_reason in ("eod", "stop", "target")
 
     def test_equity_curve_length_matches_bars(self):
-        bars = mk_bars(SPIKE3 + PULLBACK + BREAKOUT)
+        bars = mk_bars(SPIKE3 + PULLBACK + BREAKOUT + FILL)
         result = Backtester(cfg()).run(bars)
         assert len(result.equity_curve) == len(bars)
 
@@ -86,7 +89,7 @@ class TestScaleIn:
             (101.6, 106.5, 101.5, 106.3),
         ]
         result = Backtester(cfg(scale_in=True)).run(
-            mk_bars(SPIKE3 + PULLBACK + BREAKOUT + dip_and_rally)
+            mk_bars(SPIKE3 + PULLBACK + BREAKOUT + FILL + dip_and_rally)
         )
         assert result.total_trades == 1
         t = result.closed[0]

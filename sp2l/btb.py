@@ -73,7 +73,8 @@ class BTBStrategy(SpikeDetectorBase):
                 return None
             entry = min(s.level, bar.open)
             target = entry + cfg.btb_rr * (entry - stop)
-            return Signal(Direction.LONG, entry, stop, target, tag=self.tag, setup=s)
+            return Signal(Direction.LONG, entry, stop, target, tag=self.tag,
+                          entry_type="now", rr=cfg.btb_rr, setup=s)
         if bar.high < s.level:
             return None
         stop = s.point_a + buffer
@@ -82,7 +83,8 @@ class BTBStrategy(SpikeDetectorBase):
             return None
         entry = max(s.level, bar.open)
         target = entry - cfg.btb_rr * (stop - entry)
-        return Signal(Direction.SHORT, entry, stop, target, tag=self.tag, setup=s)
+        return Signal(Direction.SHORT, entry, stop, target, tag=self.tag,
+                      entry_type="now", rr=cfg.btb_rr, setup=s)
 
     # ------------------------------------------------------------------ main
 

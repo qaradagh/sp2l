@@ -206,15 +206,27 @@ class Backtester:
                     day_r += trade.r_multiple
                     open_trades.remove(trade)
 
-            # 2) fill or cancel resting limit orders placed on earlier bars
+            # 2) resolve orders placed on earlier bars
             for order in list(pending):
+                d = order["direction"]
+                if order["kind"] == "next_open":
+                    # Market entry after a confirmed break: fills at this open.
+                    pending.remove(order)
+                    entry = bar.open
+                    stop = order["stop"]
+                    per = abs(entry - stop)
+                    if per > 0:
+                        sign = 1 if d is Direction.LONG else -1
+                        target = entry + sign * order["rr"] * per
+                        open_trade(d, entry, stop, target, order["tag"], idx, bar)
+                    continue
                 filled = (
-                    bar.low <= order["entry"] if order["direction"] is Direction.LONG
+                    bar.low <= order["entry"] if d is Direction.LONG
                     else bar.high >= order["entry"]
                 )
                 if filled:
                     pending.remove(order)
-                    open_trade(order["direction"], order["entry"], order["stop"],
+                    open_trade(d, order["entry"], order["stop"],
                                order["target"], order["tag"], idx, bar)
                 elif idx - order["idx"] >= cfg.limit_wait_bars:
                     pending.remove(order)
@@ -232,14 +244,15 @@ class Backtester:
                 # "flat" means no open trade AND no resting order.
                 if (open_trades or pending) and not cfg.allow_concurrent:
                     continue
-                if signal.entry_type == "limit":
-                    pending.append(dict(
-                        direction=signal.direction, entry=signal.entry,
-                        stop=signal.stop, target=signal.target, tag=signal.tag, idx=idx,
-                    ))
-                else:
+                if signal.entry_type == "now":
                     open_trade(signal.direction, signal.entry, signal.stop,
                                signal.target, signal.tag, idx, bar)
+                else:  # "limit" rests at the level, "next_open" fills next bar
+                    pending.append(dict(
+                        kind=signal.entry_type, direction=signal.direction,
+                        entry=signal.entry, stop=signal.stop, target=signal.target,
+                        tag=signal.tag, rr=signal.rr, idx=idx,
+                    ))
 
             equity_curve.append(equity)
 

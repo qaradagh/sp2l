@@ -67,8 +67,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="daily guard: stop trading after losing this many R in a day (0 = off)")
     p.add_argument("--allow-concurrent", action="store_true",
                    help="take every signal even while already in a trade / holding an order")
+    p.add_argument("--break-confirm", choices=("touch", "close"), default="close",
+                   help="SP2L break of B: touch (shadow or close) or close (bar closes beyond B)")
     p.add_argument("--entry-mode", choices=("market", "limit"), default="market",
-                   help="SP2L entry: market (breakout, always fills) or limit (rest at B)")
+                   help="SP2L entry: market (next bar's open) or limit (rest at B)")
     p.add_argument("--limit-wait-bars", type=int, default=10,
                    help="bars a resting limit order waits for a fill before it is cancelled")
     p.add_argument("--btb-lookback", type=int, default=10,
@@ -119,6 +121,7 @@ def main(argv=None) -> int:
         max_trades_per_day=args.max_trades_day,
         max_daily_loss_r=args.max_daily_loss_r,
         allow_concurrent=args.allow_concurrent,
+        break_confirm=args.break_confirm,
         entry_mode=args.entry_mode,
         limit_wait_bars=args.limit_wait_bars,
         session_filter=args.session_filter,

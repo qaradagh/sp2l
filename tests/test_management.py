@@ -25,12 +25,15 @@ def cfg(**overrides) -> Config:
 
 
 # SP2L long flow: entry 103.05, initial SL 99.95 -> R = 3.10.
+# The market entry fills at the OPEN of the bar after the confirmed break, so
+# the last bar here opens exactly at B (103.05) to keep the R maths round.
 FLOW = [
     (100.0, 101.05, 99.95, 101.0),
     (101.0, 102.05, 100.95, 102.0),
     (102.0, 103.05, 101.95, 103.0),
-    (103.0, 103.02, 102.4, 102.5),   # pullback
-    (102.5, 103.5, 102.4, 103.4),    # breakout -> entry bar
+    (103.0, 103.02, 102.4, 102.5),      # pullback
+    (102.5, 103.5, 102.4, 103.4),       # confirmed break (closes above B)
+    (103.05, 103.15, 102.95, 103.10),   # fill bar: entry = open = 103.05
 ]
 R = 3.10
 ENTRY = 103.05
