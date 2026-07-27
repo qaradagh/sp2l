@@ -1,13 +1,14 @@
 //@version=5
-// SP2L (Spike - 2 Leg - Level) indicator v2, after Mohammad Ali Poursamadi.
+// SP2L (Spike - 2 Leg - Level) indicator v3, after Mohammad Ali Poursamadi.
 // Mirrors the Python implementation in sp2l/strategy.py + backtest.py.
 //
-// v2 adds full on-chart trade simulation and reporting:
+// Features:
 //   - live entry / SL / partial-TP / final-TP lines while a trade is open
-//   - partial take-profit and breakeven (risk-free) management
-//   - setup fate labels: cancelled / expired / skipped / off-session
-//   - outcome labels in R on every closed trade
-//   - dashboard: daily net R + recent trade list
+//   - partial take-profit, breakeven (risk-free) and ATR trailing stop
+//   - risk/reward zones (position-tool style), customizable lines/boxes
+//   - setup fate labels, outcome labels in R, daily P&L dashboard
+//   - allow-concurrent: take every setup even while already in a trade
+//   - entry order type: Market (breakout) or Limit (rest at B, may not fill)
 indicator("SP2L Poursamadi [Indicator]", "SP2L", overlay = true,
      max_lines_count = 500, max_labels_count = 500, max_boxes_count = 500)
 
@@ -28,6 +29,11 @@ rrFinal     = input.float(1.0, "Final target (R:R)", minval = 0.1, step = 0.1, g
 slBufferPct = input.float(0.0, "SL buffer (fraction of spike)", minval = 0.0, maxval = 0.5, step = 0.05, group = grpSet)
 useSession  = input.bool(false, "Session filter", group = grpSet)
 sess        = input.session("1330-2000", "Session (exchange tz)", group = grpSet)
+
+grpEntry = "Entries & concurrency"
+allowConcurrent = input.bool(false, "Take all trades (don't skip while in a trade)", group = grpEntry)
+entryMode       = input.string("Market", "Entry order type", options = ["Market", "Limit"], group = grpEntry)
+limitWaitBars   = input.int(10, "Limit: bars to wait for a fill", minval = 1, group = grpEntry)
 
 grpMgmt = "Trade management"
 usePartial = input.bool(false, "Partial take-profit", group = grpMgmt)
@@ -95,11 +101,11 @@ sbN = strongBull ? 1 : 0
 ssN = strongBear ? 1 : 0
 djN = isDoji ? 1 : 0
 
-// Derived line style + history gate.
 lineStyle = lineStyleInp == "Dashed" ? line.style_dashed : lineStyleInp == "Dotted" ? line.style_dotted : line.style_solid
 msPerDay  = 24 * 60 * 60 * 1000
 // last_bar_time follows the bar-replay cursor, so this gate works in replay too.
 drawOK    = not useHistory or time >= last_bar_time - historyDays * msPerDay
+remPct    = 1.0 - partialPct / 100.0
 
 pad2(int v) =>
     v < 10 ? "0" + str.tostring(v) : str.tostring(v)
@@ -195,7 +201,6 @@ logTrade(int t, int d, float r) =>
             array.shift(dayWs)
     0  // constant tail so the function has one consistent (ignored) return type
 
-// Today's closed-trade count and net R (for the daily risk guard).
 todayStats() =>
     int dayid = year(time) * 10000 + month(time) * 100 + dayofmonth(time)
     int n = 0
@@ -207,8 +212,74 @@ todayStats() =>
             r := array.get(dayRs, sz - 1)
     [n, r]
 
+// ---------------------------------------------------------------- types
+type Trade
+    int   dir
+    float entry
+    float initSL
+    float sl
+    float tp1
+    float tp2
+    int   entryBar
+    bool  partial = false
+    bool  be      = false
+    bool  trail   = false
+    float realR   = 0.0
+    line  eLn     = na
+    line  sLn     = na
+    line  t1Ln    = na
+    line  t2Ln    = na
+    box   riskBox = na
+    box   rewBox  = na
+    label rrLbl   = na
+
+type Pending
+    int   dir
+    float entry
+    float initSL
+    int   idx
+
+// Create a Trade, draw its objects (respecting drawOK/showRR) and return it.
+makeTrade(int d, float en, float isl) =>
+    float Ru = math.abs(en - isl)
+    Trade t = Trade.new(dir = d, entry = en, initSL = isl, sl = isl,
+         tp1 = en + (d == 1 ? 1 : -1) * partialRR * Ru,
+         tp2 = en + (d == 1 ? 1 : -1) * rrFinal * Ru,
+         entryBar = bar_index)
+    if drawOK
+        int x2 = bar_index + 1 + lineExtendBars
+        color c = d == 1 ? bullColor : bearColor
+        t.eLn  := line.new(bar_index, en, x2, en, color = entryColInp, width = lineWidthInp, style = lineStyle)
+        t.sLn  := line.new(bar_index, isl, x2, isl, color = slColInp, width = lineWidthInp, style = lineStyle)
+        t.t2Ln := line.new(bar_index, t.tp2, x2, t.tp2, color = tpColInp, width = lineWidthInp, style = lineStyle)
+        if usePartial
+            t.t1Ln := line.new(bar_index, t.tp1, x2, t.tp1, color = color.new(tpColInp, 40), width = 1, style = line.style_dashed)
+        if showRR
+            t.riskBox := box.new(bar_index, math.max(en, isl), x2, math.min(en, isl), bgcolor = riskColor, border_color = color.new(slColInp, 75), border_width = 1)
+            t.rewBox  := box.new(bar_index, math.max(en, t.tp2), x2, math.min(en, t.tp2), bgcolor = rewardColor, border_color = color.new(tpColInp, 75), border_width = 1)
+            if showRRText and Ru > 0
+                t.rrLbl := label.new(bar_index, t.tp2, "R:R 1:" + str.tostring(math.abs(t.tp2 - en) / Ru, "0.0"), style = label.style_label_left, color = color.new(tpColInp, 25), textcolor = color.white, size = size.tiny)
+        string txt = (d == 1 ? "SP2L ▲ LONG" : "SP2L ▼ SHORT")
+             + (showSignalPrices ? "\nE  " + str.tostring(en, format.mintick)
+                 + "\nSL " + str.tostring(isl, format.mintick)
+                 + (usePartial ? "\nTP1 " + str.tostring(t.tp1, format.mintick) : "")
+                 + "\nTP " + str.tostring(t.tp2, format.mintick) : "")
+        label.new(bar_index, d == 1 ? low : high, txt,
+             style = d == 1 ? label.style_label_up : label.style_label_down,
+             color = color.new(c, 15), textcolor = color.white, size = size.small)
+    t
+
+fateLabel(float y, string txt) =>
+    if showFate and drawOK
+        label.new(bar_index, y, txt, style = label.style_label_left,
+             color = color.new(color.gray, 60), textcolor = color.white, size = size.tiny)
+    0
+
 // ---------------------------------------------------------------- state
-// Setup state.
+var array<Trade>   trades = array.new<Trade>()
+var array<Pending> pend   = array.new<Pending>()
+
+// Setup state (only one pending setup at a time).
 var int   dir       = 0      // 0 idle, 1 long setup, -1 short setup
 var float pointA    = na
 var float pointB    = na
@@ -219,120 +290,126 @@ var line  lnA = na
 var line  lnB = na
 var box   spikeBox = na
 
-// Open-trade state.
-var int   tDir      = 0
-var float tEntry    = na
-var float tSL       = na     // current stop (moves on breakeven)
-var float tInitSL   = na
-var float tTP1      = na
-var float tTP2      = na
-var int   tEntryBar = na
-var bool  tPartial  = false
-var bool  tBE       = false
-var bool  tTrail    = false
-var float tRealR    = 0.0    // banked by the partial, in R
-var line  eLn  = na
-var line  sLn  = na
-var line  t1Ln = na
-var line  t2Ln = na
-var box   riskBox   = na
-var box   rewardBox = na
-var label rrLbl     = na
+// Daily counters for the risk guard.
+var int curDay    = na
+var int dayOpened = 0
+int today = year(time) * 10000 + month(time) * 100 + dayofmonth(time)
+if today != curDay
+    curDay := today
+    dayOpened := 0
 
 bool longFire      = false
 bool shortFire     = false
 bool closedThisBar = false
 bool partialThisBar = false
-float sigEntry = na
-float sigSL    = na
-float sigTP    = na
+float sigB = na
+float sigA = na
 
 [todayN, todayR] = todayStats()
-bool guardBlocked = (maxTradesDay > 0 and todayN >= maxTradesDay) or
-     (maxLossDayR > 0 and todayR <= -maxLossDayR)
+bool guardBlocked = (maxTradesDay > 0 and dayOpened >= maxTradesDay) or (maxLossDayR > 0 and todayR <= -maxLossDayR)
 
-// ------------------------------------------- 1) manage the open trade first
-bool  closeNow = false
-float closePx  = na
-float closeR   = na
-string closeTag = ""
-
-if tDir != 0 and bar_index > tEntryBar
-    float Ru = math.abs(tEntry - tInitSL)
-    bool slHit = tDir == 1 ? low <= tSL : high >= tSL
+// ------------------------------------------- 1) manage every open trade
+int ti = array.size(trades) - 1
+while ti >= 0
+    Trade t = array.get(trades, ti)
+    float Ru = math.abs(t.entry - t.initSL)
+    bool closeNow = false
+    float closePx = na
+    float closeR  = na
+    string closeTag = ""
+    bool slHit = t.dir == 1 ? low <= t.sl : high >= t.sl
     if slHit
-        float rem = tPartial ? 1.0 - partialPct / 100.0 : 1.0
-        float slR = (tDir == 1 ? tSL - tEntry : tEntry - tSL) / Ru
+        float rem = t.partial ? remPct : 1.0
+        float slR = (t.dir == 1 ? t.sl - t.entry : t.entry - t.sl) / Ru
         closeNow := true
-        closePx := tSL
-        closeR := tRealR + slR * rem - costR
-        closeTag := slR >= 0 ? (tTrail ? "TRL" : "BE") : "SL"
+        closePx  := t.sl
+        closeR   := t.realR + slR * rem - costR
+        closeTag := slR >= 0 ? (t.trail ? "TRL" : "BE") : "SL"
     else
-        if usePartial and not tPartial
-            bool p1 = tDir == 1 ? high >= tTP1 : low <= tTP1
+        if usePartial and not t.partial
+            bool p1 = t.dir == 1 ? high >= t.tp1 : low <= t.tp1
             if p1
-                tRealR := tRealR + partialRR * partialPct / 100.0
-                tPartial := true
+                t.realR := t.realR + partialRR * partialPct / 100.0
+                t.partial := true
                 partialThisBar := true
-                if beMode == "After partial" and not tBE
-                    float ns = tEntry + (tDir == 1 ? 1 : -1) * beOffsetR * Ru
-                    tSL := tDir == 1 ? math.max(tSL, ns) : math.min(tSL, ns)
-                    tBE := true
-        if beMode == "At RR trigger" and not tBE
-            bool trg = tDir == 1 ? high >= tEntry + beTrigRR * Ru : low <= tEntry - beTrigRR * Ru
+                if beMode == "After partial" and not t.be
+                    float ns = t.entry + (t.dir == 1 ? 1 : -1) * beOffsetR * Ru
+                    t.sl := t.dir == 1 ? math.max(t.sl, ns) : math.min(t.sl, ns)
+                    t.be := true
+                if not na(t.t1Ln)
+                    line.set_color(t.t1Ln, color.new(color.green, 70))
+                    line.set_x2(t.t1Ln, bar_index)
+        if beMode == "At RR trigger" and not t.be
+            bool trg = t.dir == 1 ? high >= t.entry + beTrigRR * Ru : low <= t.entry - beTrigRR * Ru
             if trg
-                float ns = tEntry + (tDir == 1 ? 1 : -1) * beOffsetR * Ru
-                tSL := tDir == 1 ? math.max(tSL, ns) : math.min(tSL, ns)
-                tBE := true
+                float ns = t.entry + (t.dir == 1 ? 1 : -1) * beOffsetR * Ru
+                t.sl := t.dir == 1 ? math.max(t.sl, ns) : math.min(t.sl, ns)
+                t.be := true
         if trailMult > 0 and not na(atrVal)
-            float tc = tDir == 1 ? close - trailMult * atrVal : close + trailMult * atrVal
-            float ns2 = tDir == 1 ? math.max(tSL, tc) : math.min(tSL, tc)
-            if ns2 != tSL
-                tSL := ns2
-                tTrail := true
-        bool tpHit = tDir == 1 ? high >= tTP2 : low <= tTP2
+            float tc = t.dir == 1 ? close - trailMult * atrVal : close + trailMult * atrVal
+            float ns2 = t.dir == 1 ? math.max(t.sl, tc) : math.min(t.sl, tc)
+            if ns2 != t.sl
+                t.sl := ns2
+                t.trail := true
+        bool tpHit = t.dir == 1 ? high >= t.tp2 : low <= t.tp2
         if tpHit
-            float rem = tPartial ? 1.0 - partialPct / 100.0 : 1.0
+            float rem = t.partial ? remPct : 1.0
             closeNow := true
-            closePx := tTP2
-            closeR := tRealR + rrFinal * rem - costR
+            closePx  := t.tp2
+            closeR   := t.realR + rrFinal * rem - costR
             closeTag := "TP"
-    if not closeNow and not na(sLn)
-        line.set_y1(sLn, tSL)
-        line.set_y2(sLn, tSL)
-        if tBE or tTrail
-            line.set_color(sLn, color.blue)
-        if partialThisBar and not na(t1Ln)
-            line.set_color(t1Ln, color.new(color.green, 70))
-            line.set_x2(t1Ln, bar_index)
+    if closeNow
+        if not na(t.eLn)
+            line.set_x2(t.eLn, bar_index)
+            line.set_x2(t.sLn, bar_index)
+            line.set_x2(t.t2Ln, bar_index)
+            if not na(t.t1Ln)
+                line.set_x2(t.t1Ln, math.min(line.get_x2(t.t1Ln), bar_index))
+        if not na(t.riskBox)
+            box.set_right(t.riskBox, bar_index)
+            box.set_right(t.rewBox, bar_index)
+        if drawOK
+            color oc = closeTag == "TP" ? (t.dir == 1 ? bullColor : bearColor) : closeTag == "SL" ? color.red : color.blue
+            label.new(bar_index, closePx, closeTag + " " + fmtR(closeR),
+                 style = t.dir == 1 ? label.style_label_down : label.style_label_up,
+                 color = color.new(oc, 20), textcolor = color.white, size = size.small)
+        logTrade(time, t.dir, closeR)
+        closedThisBar := true
+        array.remove(trades, ti)
+    else
+        if not na(t.sLn)
+            line.set_y1(t.sLn, t.sl)
+            line.set_y2(t.sLn, t.sl)
+            if t.be or t.trail
+                line.set_color(t.sLn, color.blue)
+        int xr = bar_index + lineExtendBars
+        if not na(t.eLn)
+            line.set_x2(t.eLn, xr)
+            line.set_x2(t.sLn, xr)
+            line.set_x2(t.t2Ln, xr)
+            if not na(t.t1Ln) and not t.partial
+                line.set_x2(t.t1Ln, xr)
+        if not na(t.riskBox)
+            box.set_right(t.riskBox, xr)
+            box.set_right(t.rewBox, xr)
+    ti -= 1
 
-if closeNow
-    if not na(eLn)
-        line.set_x2(eLn, bar_index)
-        line.set_x2(sLn, bar_index)
-        line.set_x2(t2Ln, bar_index)
-        if not na(t1Ln)
-            line.set_x2(t1Ln, math.min(line.get_x2(t1Ln), bar_index))
-    if not na(riskBox)
-        box.set_right(riskBox, bar_index)
-        box.set_right(rewardBox, bar_index)
-    if drawOK
-        color oc = closeTag == "TP" ? (tDir == 1 ? bullColor : bearColor) : closeTag == "SL" ? color.red : color.blue
-        label.new(bar_index, closePx, closeTag + " " + fmtR(closeR),
-             style = tDir == 1 ? label.style_label_down : label.style_label_up,
-             color = color.new(oc, 20), textcolor = color.white, size = size.small)
-    logTrade(time, tDir, closeR)
-    closedThisBar := true
-    tDir := 0
-    eLn := na
-    sLn := na
-    t1Ln := na
-    t2Ln := na
-    riskBox := na
-    rewardBox := na
-    rrLbl := na
+// ------------------------------------------- 2) fill / cancel resting limits
+int pi = array.size(pend) - 1
+while pi >= 0
+    Pending p = array.get(pend, pi)
+    bool filled = p.dir == 1 ? low <= p.entry : high >= p.entry
+    if filled
+        array.remove(pend, pi)
+        Trade nt = makeTrade(p.dir, p.entry, p.initSL)
+        array.push(trades, nt)
+        dayOpened += 1
+    else if bar_index - p.idx >= limitWaitBars
+        array.remove(pend, pi)
+        fateLabel(p.entry, "◌ Not activated")
+    pi -= 1
 
-// ------------------------------------------- 2) setup lifecycle
+// ------------------------------------------- 3) setup lifecycle
 if dir != 0
     float spLen = math.abs(pointB - pointA)
     bool invalid = dir == 1 ? low <= pointB - spLen * maxRetrace : high >= pointB + spLen * maxRetrace
@@ -341,10 +418,7 @@ if dir != 0
         if not na(lnA)
             line.set_color(lnA, color.new(color.gray, 70))
             line.set_color(lnB, color.new(color.gray, 70))
-        if showFate and drawOK
-            label.new(bar_index, pointB, invalid ? "✖ Cancelled" : "✖ Expired",
-                 style = label.style_label_left, color = color.new(color.gray, 60),
-                 textcolor = color.white, size = size.tiny)
+        fateLabel(pointB, invalid ? "✖ Cancelled" : "✖ Expired")
         dir := 0
         inPull := false
         pullStart := na
@@ -376,31 +450,12 @@ if dir != 0 and not inPull and bar_index > spikeEnd
 if dir != 0 and inPull and bar_index > pullStart
     bool broke = dir == 1 ? high > pointB : low < pointB
     if broke
-        float spLen = math.abs(pointB - pointA)
-        float buffer = spLen * slBufferPct
-        if not inSession
-            if showFate and drawOK
-                label.new(bar_index, pointB, "◌ Off-session", style = label.style_label_left,
-                     color = color.new(color.gray, 60), textcolor = color.white, size = size.tiny)
-        else if tDir != 0
-            if showFate and drawOK
-                label.new(bar_index, pointB, "◌ Skipped (in trade)", style = label.style_label_left,
-                     color = color.new(color.gray, 60), textcolor = color.white, size = size.tiny)
-        else if guardBlocked
-            if showFate and drawOK
-                label.new(bar_index, pointB, "◌ Daily limit", style = label.style_label_left,
-                     color = color.new(color.gray, 60), textcolor = color.white, size = size.tiny)
+        sigB := pointB
+        sigA := pointA
+        if dir == 1
+            longFire := true
         else
-            if dir == 1
-                sigEntry := math.max(pointB, open)
-                sigSL := pointA - buffer
-                sigTP := sigEntry + rrFinal * (sigEntry - sigSL)
-                longFire := true
-            else
-                sigEntry := math.min(pointB, open)
-                sigSL := pointA + buffer
-                sigTP := sigEntry - rrFinal * (sigSL - sigEntry)
-                shortFire := true
+            shortFire := true
         if not na(lnA)
             line.set_x2(lnA, bar_index)
             line.set_x2(lnB, bar_index)
@@ -411,7 +466,7 @@ if dir != 0 and inPull and bar_index > pullStart
         lnB := na
         spikeBox := na
 
-// ------------------------------------------- 3) adopt a fresh spike when idle
+// ------------------------------------------- 4) adopt a fresh spike when idle
 if dir == 0 and (okBull or okBear)
     dir := okBull ? 1 : -1
     pointA := okBull ? aBull : aBear
@@ -446,91 +501,26 @@ if dir != 0 and not na(lnA)
     line.set_x2(lnA, bar_index)
     line.set_x2(lnB, bar_index)
 
-// ------------------------------------------- 4) open the trade on a signal
+// ------------------------------------------- 5) act on a fresh breakout signal
 if longFire or shortFire
-    tDir := longFire ? 1 : -1
-    tEntry := sigEntry
-    tInitSL := sigSL
-    tSL := sigSL
-    tTP2 := sigTP
-    float Ru = math.abs(tEntry - tInitSL)
-    tTP1 := tEntry + (tDir == 1 ? 1 : -1) * partialRR * Ru
-    tEntryBar := bar_index
-    tPartial := false
-    tBE := false
-    tTrail := false
-    tRealR := 0.0
-    color c = tDir == 1 ? bullColor : bearColor
-    int x2 = bar_index + 1 + lineExtendBars
-    if drawOK
-        eLn := line.new(bar_index, tEntry, x2, tEntry, color = entryColInp, width = lineWidthInp, style = lineStyle)
-        sLn := line.new(bar_index, tSL, x2, tSL, color = slColInp, width = lineWidthInp, style = lineStyle)
-        t2Ln := line.new(bar_index, tTP2, x2, tTP2, color = tpColInp, width = lineWidthInp, style = lineStyle)
-        if usePartial
-            t1Ln := line.new(bar_index, tTP1, x2, tTP1, color = color.new(tpColInp, 40), width = 1, style = line.style_dashed)
-        if showRR
-            float rTop = math.max(tEntry, tInitSL)
-            float rBot = math.min(tEntry, tInitSL)
-            float wTop = math.max(tEntry, tTP2)
-            float wBot = math.min(tEntry, tTP2)
-            riskBox := box.new(bar_index, rTop, x2, rBot, bgcolor = riskColor, border_color = color.new(slColInp, 75), border_width = 1)
-            rewardBox := box.new(bar_index, wTop, x2, wBot, bgcolor = rewardColor, border_color = color.new(tpColInp, 75), border_width = 1)
-            if showRRText
-                float rrRatio = math.abs(tTP2 - tEntry) / math.abs(tEntry - tInitSL)
-                rrLbl := label.new(bar_index, tTP2, "R:R 1:" + str.tostring(rrRatio, "0.0"),
-                     style = label.style_label_left, color = color.new(tpColInp, 25), textcolor = color.white, size = size.tiny)
-        string txt = (tDir == 1 ? "SP2L ▲ LONG" : "SP2L ▼ SHORT")
-             + (showSignalPrices ? "\nE  " + str.tostring(tEntry, format.mintick)
-                 + "\nSL " + str.tostring(tSL, format.mintick)
-                 + (usePartial ? "\nTP1 " + str.tostring(tTP1, format.mintick) : "")
-                 + "\nTP " + str.tostring(tTP2, format.mintick) : "")
-        label.new(bar_index, tDir == 1 ? low : high, txt,
-             style = tDir == 1 ? label.style_label_up : label.style_label_down,
-             color = color.new(c, 15), textcolor = color.white, size = size.small)
-    // The signal bar itself may already reach SL or final TP (conservative
-    // ordering; partial/BE management starts on the next bar).
-    bool slHit0 = tDir == 1 ? low <= tSL : high >= tSL
-    bool tpHit0 = tDir == 1 ? high >= tTP2 : low <= tTP2
-    if slHit0 or tpHit0
-        float r0 = (slHit0 ? -1.0 : rrFinal) - costR
-        float px0 = slHit0 ? tSL : tTP2
-        if not na(eLn)
-            line.set_x2(eLn, bar_index)
-            line.set_x2(sLn, bar_index)
-            line.set_x2(t2Ln, bar_index)
-            if not na(t1Ln)
-                line.set_x2(t1Ln, bar_index)
-        if not na(riskBox)
-            box.set_right(riskBox, bar_index)
-            box.set_right(rewardBox, bar_index)
-        if drawOK
-            color oc0 = slHit0 ? color.red : c
-            label.new(bar_index, px0, (slHit0 ? "SL " : "TP ") + fmtR(r0),
-                 style = tDir == 1 ? label.style_label_down : label.style_label_up,
-                 color = color.new(oc0, 20), textcolor = color.white, size = size.small)
-        logTrade(time, tDir, r0)
-        closedThisBar := true
-        tDir := 0
-        eLn := na
-        sLn := na
-        t1Ln := na
-        t2Ln := na
-        riskBox := na
-        rewardBox := na
-        rrLbl := na
-
-// keep live trade lines + RR zones glued to the current bar (+ optional extension)
-if tDir != 0
-    int xr = bar_index + lineExtendBars
-    if not na(eLn)
-        line.set_x2(eLn, xr)
-        line.set_x2(sLn, xr)
-        line.set_x2(t2Ln, xr)
-        if not na(t1Ln) and not tPartial
-            line.set_x2(t1Ln, xr)
-    if not na(riskBox)
-        box.set_right(riskBox, xr)
-        box.set_right(rewardBox, xr)
+    int d = longFire ? 1 : -1
+    float buffer = math.abs(sigB - sigA) * slBufferPct
+    float isl = d == 1 ? sigA - buffer : sigA + buffer
+    bool busy = array.size(trades) > 0 or array.size(pend) > 0
+    if not inSession
+        fateLabel(sigB, "◌ Off-session")
+    else if busy and not allowConcurrent
+        fateLabel(sigB, "◌ Skipped (in trade)")
+    else if guardBlocked
+        fateLabel(sigB, "◌ Daily limit")
+    else if entryMode == "Limit"
+        Pending p = Pending.new(dir = d, entry = sigB, initSL = isl, idx = bar_index)
+        array.push(pend, p)
+    else
+        float en = d == 1 ? math.max(sigB, open) : math.min(sigB, open)
+        Trade nt = makeTrade(d, en, isl)
+        array.push(trades, nt)
+        dayOpened += 1
 
 plotshape(longFire,  "Long signal",  shape.triangleup,   location.belowbar, color = bullColor, size = size.tiny)
 plotshape(shortFire, "Short signal", shape.triangledown, location.abovebar, color = bearColor, size = size.tiny)
@@ -540,7 +530,16 @@ var table tbl = table.new(position.top_right, 2, 5, bgcolor = color.new(color.bl
 if showTable and barstate.islast
     string stTxt = dir == 0 ? "IDLE" : inPull ? "PULLBACK" : "SPIKE"
     color stCol = dir == 1 ? bullColor : dir == -1 ? bearColor : color.gray
-    float liveR = tDir != 0 and math.abs(tEntry - tInitSL) > 0 ? tRealR + (tDir == 1 ? close - tEntry : tEntry - close) / math.abs(tEntry - tInitSL) * (tPartial ? 1.0 - partialPct / 100.0 : 1.0) : na
+    int nOpen = array.size(trades)
+    int nPend = array.size(pend)
+    float liveR = 0.0
+    if nOpen > 0
+        for i = 0 to nOpen - 1
+            Trade t = array.get(trades, i)
+            float Ru = math.abs(t.entry - t.initSL)
+            if Ru > 0
+                liveR += t.realR + (t.dir == 1 ? close - t.entry : t.entry - close) / Ru * (t.partial ? remPct : 1.0)
+    string tradeTxt = nOpen == 0 and nPend == 0 ? "FLAT" : "OPEN x" + str.tostring(nOpen) + (nPend > 0 ? " +" + str.tostring(nPend) + "L" : "") + "  " + fmtR(liveR)
     table.cell(tbl, 0, 0, "SP2L",  text_color = color.white, text_size = size.small)
     table.cell(tbl, 1, 0, stTxt,   text_color = color.white, text_size = size.small, bgcolor = color.new(stCol, 30))
     table.cell(tbl, 0, 1, "Dir",   text_color = color.silver, text_size = size.small)
@@ -550,8 +549,7 @@ if showTable and barstate.islast
     table.cell(tbl, 0, 3, "Stop A",  text_color = color.silver, text_size = size.small)
     table.cell(tbl, 1, 3, dir != 0 ? str.tostring(pointA, format.mintick) : "—", text_color = color.red, text_size = size.small)
     table.cell(tbl, 0, 4, "Trade", text_color = color.silver, text_size = size.small)
-    table.cell(tbl, 1, 4, tDir == 0 ? "FLAT" : (tDir == 1 ? "OPEN ▲ " : "OPEN ▼ ") + fmtR(liveR),
-         text_color = tDir == 0 ? color.white : liveR >= 0 ? color.lime : color.red, text_size = size.small)
+    table.cell(tbl, 1, 4, tradeTxt, text_color = nOpen == 0 ? color.white : liveR >= 0 ? color.lime : color.red, text_size = size.small)
 
 // ---------------------------------------------------------------- dashboard
 var table dash = table.new(position.bottom_right, 3, dashDays + dashList + 3,
@@ -598,8 +596,8 @@ if showDash and barstate.islast
             row += 1
 
 // ---------------------------------------------------------------- alerts
-alertcondition(longFire,  "SP2L Long",  "SP2L: long breakout entry triggered")
-alertcondition(shortFire, "SP2L Short", "SP2L: short breakout entry triggered")
-alertcondition(longFire or shortFire, "SP2L Any signal", "SP2L: entry signal triggered")
+alertcondition(longFire,  "SP2L Long",  "SP2L: long breakout signal")
+alertcondition(shortFire, "SP2L Short", "SP2L: short breakout signal")
+alertcondition(longFire or shortFire, "SP2L Any signal", "SP2L: entry signal")
 alertcondition(partialThisBar, "SP2L Partial filled", "SP2L: partial take-profit filled")
-alertcondition(closedThisBar, "SP2L Trade closed", "SP2L: trade closed (see chart label for the result)")
+alertcondition(closedThisBar, "SP2L Trade closed", "SP2L: a trade closed (see chart label)")
