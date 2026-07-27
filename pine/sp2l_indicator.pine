@@ -8,7 +8,8 @@
 //   - risk/reward zones (position-tool style), customizable lines/boxes
 //   - setup fate labels, outcome labels in R, daily P&L dashboard
 //   - allow-concurrent: take every setup even while already in a trade
-//   - entry order type: Market (breakout) or Limit (rest at B, may not fill)
+//   - four entry triggers: break of B confirmed by close only or by shadow,
+//     entered market at the next bar's open or by a limit resting at B
 indicator("SP2L Poursamadi [Indicator]", "SP2L", overlay = true,
      max_lines_count = 500, max_labels_count = 500, max_boxes_count = 500)
 
@@ -31,9 +32,13 @@ useSession  = input.bool(false, "Session filter", group = grpSet)
 sess        = input.session("1330-2000", "Session (exchange tz)", group = grpSet)
 
 grpEntry = "Entries & concurrency"
-allowConcurrent = input.bool(false, "Take all trades (don't skip while in a trade)", group = grpEntry)
-entryMode       = input.string("Market", "Entry order type", options = ["Market", "Limit"], group = grpEntry)
+// The four entry options are breakConfirm x entryMode:
+//   Shadow or close + Market -> option 1     Shadow or close + Limit -> option 2
+//   Close only      + Market -> option 3     Close only      + Limit -> option 4
+breakConfirm    = input.string("Close only", "Break of B counts on", options = ["Close only", "Shadow or close"], group = grpEntry)
+entryMode       = input.string("Market (next bar open)", "Entry order", options = ["Market (next bar open)", "Limit (at B)"], group = grpEntry)
 limitWaitBars   = input.int(10, "Limit: bars to wait for a fill", minval = 1, group = grpEntry)
+allowConcurrent = input.bool(false, "Take all trades (don't skip while in a trade)", group = grpEntry)
 
 grpMgmt = "Trade management"
 usePartial = input.bool(false, "Partial take-profit", group = grpMgmt)
@@ -234,10 +239,12 @@ type Trade
     label rrLbl   = na
 
 type Pending
-    int   dir
-    float entry
-    float initSL
-    int   idx
+    int    dir
+    float  entry     // level B: the limit price, or the market reference
+    float  initSL
+    int    idx
+    bool   isLimit   // false = market filled at the next bar's open
+    line   lvlLn = na
 
 // Create a Trade, draw its objects (respecting drawOK/showRR) and return it.
 makeTrade(int d, float en, float isl) =>
@@ -394,19 +401,35 @@ while ti >= 0
             box.set_right(t.rewBox, xr)
     ti -= 1
 
-// ------------------------------------------- 2) fill / cancel resting limits
+// ------------------------------------------- 2) resolve orders from earlier bars
 int pi = array.size(pend) - 1
 while pi >= 0
     Pending p = array.get(pend, pi)
-    bool filled = p.dir == 1 ? low <= p.entry : high >= p.entry
-    if filled
+    if not p.isLimit
+        // Market entry after a confirmed break: fills at this bar's open.
         array.remove(pend, pi)
-        Trade nt = makeTrade(p.dir, p.entry, p.initSL)
+        if not na(p.lvlLn)
+            line.set_x2(p.lvlLn, bar_index)
+        Trade nt = makeTrade(p.dir, open, p.initSL)
         array.push(trades, nt)
         dayOpened += 1
-    else if bar_index - p.idx >= limitWaitBars
-        array.remove(pend, pi)
-        fateLabel(p.entry, "◌ Not activated")
+    else
+        bool filled = p.dir == 1 ? low <= p.entry : high >= p.entry
+        if filled
+            array.remove(pend, pi)
+            if not na(p.lvlLn)
+                line.set_x2(p.lvlLn, bar_index)
+            Trade nt = makeTrade(p.dir, p.entry, p.initSL)
+            array.push(trades, nt)
+            dayOpened += 1
+        else if bar_index - p.idx >= limitWaitBars
+            array.remove(pend, pi)
+            if not na(p.lvlLn)
+                line.set_x2(p.lvlLn, bar_index)
+                line.set_color(p.lvlLn, color.new(color.gray, 60))
+            fateLabel(p.entry, "◌ Not activated")
+        else if not na(p.lvlLn)
+            line.set_x2(p.lvlLn, bar_index)  // keep the waiting limit visible
     pi -= 1
 
 // ------------------------------------------- 3) setup lifecycle
@@ -448,7 +471,10 @@ if dir != 0 and not inPull and bar_index > spikeEnd
         pullStart := bar_index
 
 if dir != 0 and inPull and bar_index > pullStart
-    bool broke = dir == 1 ? high > pointB : low < pointB
+    bool closeOnly = breakConfirm == "Close only"
+    bool broke = dir == 1
+         ? (closeOnly ? close > pointB : high > pointB)
+         : (closeOnly ? close < pointB : low < pointB)
     if broke
         sigB := pointB
         sigA := pointA
@@ -502,6 +528,8 @@ if dir != 0 and not na(lnA)
     line.set_x2(lnB, bar_index)
 
 // ------------------------------------------- 5) act on a fresh breakout signal
+// Neither entry mode fills on the breakout bar: market waits for the next
+// bar's open, a limit waits for price to come back to B.
 if longFire or shortFire
     int d = longFire ? 1 : -1
     float buffer = math.abs(sigB - sigA) * slBufferPct
@@ -513,14 +541,15 @@ if longFire or shortFire
         fateLabel(sigB, "◌ Skipped (in trade)")
     else if guardBlocked
         fateLabel(sigB, "◌ Daily limit")
-    else if entryMode == "Limit"
-        Pending p = Pending.new(dir = d, entry = sigB, initSL = isl, idx = bar_index)
-        array.push(pend, p)
     else
-        float en = d == 1 ? math.max(sigB, open) : math.min(sigB, open)
-        Trade nt = makeTrade(d, en, isl)
-        array.push(trades, nt)
-        dayOpened += 1
+        bool isLimit = entryMode == "Limit (at B)"
+        Pending p = Pending.new(dir = d, entry = sigB, initSL = isl,
+             idx = bar_index, isLimit = isLimit)
+        if drawOK
+            p.lvlLn := line.new(bar_index, sigB, bar_index + 1, sigB,
+                 color = color.new(entryColInp, 35), width = 1,
+                 style = isLimit ? line.style_dashed : line.style_dotted)
+        array.push(pend, p)
 
 plotshape(longFire,  "Long signal",  shape.triangleup,   location.belowbar, color = bullColor, size = size.tiny)
 plotshape(shortFire, "Short signal", shape.triangledown, location.abovebar, color = bearColor, size = size.tiny)
