@@ -1,0 +1,836 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>راهنمای اکسپرت SP2L برای متاتریدر ۵</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ============================================================ COVER -->
+<section class="page cover">
+  <div class="eyebrow">راهنمای کاربری — نسخه ۱.۰</div>
+  <h1>اکسپرت SP2L پورصمدی<br>برای متاتریدر ۵</h1>
+  <div class="rule"></div>
+  <div class="sub">
+    اجرای خودکار استراتژی اسپایک ← پولبک ← شکست سطح<br>
+    با مدیریت ریسک، پارشال، ریسک‌فری و گاردهای روزانه
+  </div>
+  <div class="chips">
+    <span class="chip">MQL5</span>
+    <span class="chip">چهار آپشن ورود</span>
+    <span class="chip">حجم خودکار از درصد ریسک</span>
+    <span class="chip">تریلینگ ATR</span>
+    <span class="chip">پنل وضعیت</span>
+  </div>
+  <div class="meta">
+    مخزن پروژه: <span dir="ltr">qaradagh/sp2l</span><br>
+    فایل: <span dir="ltr">mt5/SP2L_Poursamadi_EA.mq5</span><br>
+    <strong>اول روی حساب دمو تست کنید.</strong> این سند آموزشی/پژوهشی است.
+  </div>
+</section>
+
+<!-- ============================================================== TOC -->
+<section class="page">
+  <h2>فهرست مطالب</h2>
+  <ul class="toc">
+    <li><span class="num">۱</span><span class="t">اکسپرت چه می‌کند و چه نمی‌کند</span><span class="pg">۳</span></li>
+    <li><span class="num">۲</span><span class="t">نصب و کامپایل گام‌به‌گام</span><span class="pg">۴</span></li>
+    <li><span class="num">۳</span><span class="t">اولین اجرا روی حساب دمو</span><span class="pg">۵</span></li>
+    <li><span class="num">۴</span><span class="t">منطق معاملاتی و زمان‌بندی اجرا</span><span class="pg">۶</span></li>
+    <li><span class="num">۵</span><span class="t">چهار آپشن ورود</span><span class="pg">۷</span></li>
+    <li><span class="num">۶</span><span class="t">پارامترها: تشخیص اسپایک</span><span class="pg">۸</span></li>
+    <li><span class="num">۷</span><span class="t">پارامترها: چرخه ستاپ و ورود</span><span class="pg">۹</span></li>
+    <li><span class="num">۸</span><span class="t">مدیریت ریسک و حجم پوزیشن</span><span class="pg">۱۰</span></li>
+    <li><span class="num">۹</span><span class="t">پارشال، ریسک‌فری و تریلینگ</span><span class="pg">۱۱</span></li>
+    <li><span class="num">۱۰</span><span class="t">گاردهای روزانه و فیلتر سشن</span><span class="pg">۱۲</span></li>
+    <li><span class="num">۱۱</span><span class="t">پنل وضعیت و خواندن لاگ‌ها</span><span class="pg">۱۳</span></li>
+    <li><span class="num">۱۲</span><span class="t">بک‌تست در Strategy Tester</span><span class="pg">۱۴</span></li>
+    <li><span class="num">۱۳</span><span class="t">تفاوت‌ها با نسخه پایتون و اندیکاتور</span><span class="pg">۱۵</span></li>
+    <li><span class="num">۱۴</span><span class="t">عیب‌یابی</span><span class="pg">۱۶</span></li>
+    <li><span class="num">۱۵</span><span class="t">چک‌لیست پیش از حساب واقعی</span><span class="pg">۱۷</span></li>
+  </ul>
+
+  <div class="note danger" style="margin-top:8mm">
+    <b>هشدار جدی پیش از شروع</b>
+    <p>یک اکسپرت، سفارش‌ها را <strong>بدون تأیید شما</strong> ارسال می‌کند. یک پارامتر
+    اشتباه می‌تواند در چند ساعت حساب را نابود کند. تا وقتی حداقل یک ماه کامل روی
+    <strong>حساب دمو</strong> نتیجه قابل‌قبول نگرفته‌اید، آن را روی حساب واقعی اجرا
+    نکنید. مسئولیت کامل هر معامله بر عهده شماست.</p>
+  </div>
+  <span class="page-num">۲</span><span class="page-tag">راهنمای اکسپرت SP2L — متاتریدر ۵</span>
+</section>
+
+<!-- =========================================================== 1 -->
+<section class="page">
+  <h2><span class="n">۱</span>اکسپرت چه می‌کند و چه نمی‌کند</h2>
+
+  <h3>چه کارهایی انجام می‌دهد</h3>
+  <div class="grid">
+    <div class="card">
+      <h4>شناسایی ستاپ</h4>
+      <p>کندل‌های اسپایک، گپ قیمتی (FVG)، فیلتر قدرت ATR، پولبک و شکست سطح B را
+      خودکار تشخیص می‌دهد.</p>
+    </div>
+    <div class="card">
+      <h4>ارسال سفارش</h4>
+      <p>سفارش مارکت یا لیمیت را با حد ضرر و حد سود از پیش محاسبه‌شده ارسال می‌کند.</p>
+    </div>
+    <div class="card">
+      <h4>محاسبه حجم</h4>
+      <p>حجم را از درصد ریسک شما و فاصله حد ضرر محاسبه می‌کند — نه حجم ثابت.</p>
+    </div>
+    <div class="card">
+      <h4>مدیریت پوزیشن</h4>
+      <p>پارشال، انتقال استاپ به نقطه ورود (ریسک‌فری) و تریلینگ ATR را خودکار انجام
+      می‌دهد.</p>
+    </div>
+    <div class="card">
+      <h4>کنترل ریسک روزانه</h4>
+      <p>سقف تعداد معامله و سقف ضرر روزانه را رعایت می‌کند و بعد از آن معامله نمی‌گیرد.</p>
+    </div>
+    <div class="card">
+      <h4>گزارش وضعیت</h4>
+      <p>پنل روی چارت و لاگ کامل در تب Experts، تا همیشه بدانید چرا چه اتفاقی افتاد.</p>
+    </div>
+  </div>
+
+  <h3>چه کارهایی انجام نمی‌دهد</h3>
+  <ul>
+    <li>استراتژی <strong>Pro BTB</strong> را اجرا نمی‌کند — این اکسپرت فقط SP2L است.</li>
+    <li>خبر و تقویم اقتصادی را نمی‌خواند و پیش از اخبار پوزیشن نمی‌بندد.</li>
+    <li>چند نماد را هم‌زمان مدیریت نمی‌کند — روی هر چارت مستقل عمل می‌کند.</li>
+    <li>هیچ تضمینی برای سوددهی ندارد.</li>
+  </ul>
+
+  <div class="note warn">
+    <b>یک نکته مهم درباره چند چارت</b>
+    <p>اگر اکسپرت را روی چند چارت هم‌زمان اجرا کنید، هر نسخه ریسک خودش را مستقل
+    حساب می‌کند و از پوزیشن‌های نسخه‌های دیگر خبر ندارد. در این حالت
+    <code>MagicNumber</code> هر نسخه را متفاوت بگذارید و <strong>درصد ریسک هر کدام را
+    کم کنید</strong> تا مجموع ریسکتان از حد قابل‌قبول بیشتر نشود.</p>
+  </div>
+
+  <span class="page-num">۳</span><span class="page-tag">راهنمای اکسپرت SP2L — متاتریدر ۵</span>
+</section>
+
+<!-- =========================================================== 2 -->
+<section class="page">
+  <h2><span class="n">۲</span>نصب و کامپایل گام‌به‌گام</h2>
+
+  <ol class="steps">
+    <li>متاتریدر ۵ را باز کنید. از منوی بالا: <strong>File → Open Data Folder</strong>.
+    پوشه دیتای متاتریدر باز می‌شود.</li>
+    <li>وارد پوشه <code>MQL5</code> و سپس <code>Experts</code> شوید.</li>
+    <li>فایل <code>SP2L_Poursamadi_EA.mq5</code> را در این پوشه کپی کنید.</li>
+    <li>به متاتریدر برگردید و کلید <strong>F4</strong> را بزنید تا <strong>MetaEditor</strong> باز شود.</li>
+    <li>در پنجره Navigator سمت چپ MetaEditor، فایل را زیر شاخه Experts پیدا و روی آن دوبار کلیک کنید.</li>
+    <li>کلید <strong>F7</strong> را بزنید (یا دکمه <strong>Compile</strong>). در پایین باید پیام
+    <span dir="ltr">0 errors, 0 warnings</span> ببینید.</li>
+    <li>به متاتریدر برگردید. در پنجره <strong>Navigator</strong> (کلید Ctrl+N)، زیر
+    <strong>Expert Advisors</strong> نام اکسپرت را می‌بینید.</li>
+  </ol>
+
+  <div class="note ok">
+    <b>اگر اکسپرت را در Navigator نمی‌بینید</b>
+    <p>روی عنوان <strong>Expert Advisors</strong> راست‌کلیک کرده و
+    <strong>Refresh</strong> را بزنید.</p>
+  </div>
+
+  <h3>فعال کردن معاملات خودکار</h3>
+  <p>دو سوییچ باید هم‌زمان روشن باشند وگرنه اکسپرت هیچ سفارشی نمی‌فرستد:</p>
+  <ol class="steps">
+    <li>دکمه <strong>Algo Trading</strong> در نوار ابزار بالای متاتریدر باید
+    <strong>سبز</strong> باشد (اگر قرمز است روی آن کلیک کنید).</li>
+    <li>هنگام کشیدن اکسپرت روی چارت، در تب <strong>Common</strong> تیک
+    <strong>Allow Algo Trading</strong> را بزنید.</li>
+  </ol>
+
+  <h3>اضافه کردن به چارت</h3>
+  <ol class="steps">
+    <li>چارت نماد و تایم‌فریم هدف را باز کنید (پیشنهاد: <span dir="ltr">XAUUSD</span> روی <span dir="ltr">M5</span>).</li>
+    <li>اکسپرت را از Navigator روی چارت بکشید و رها کنید.</li>
+    <li>پنجره تنظیمات باز می‌شود؛ تب <strong>Inputs</strong> همه پارامترها را دارد.</li>
+    <li>روی <strong>OK</strong> بزنید. اگر همه‌چیز درست باشد، در گوشه بالا-راست چارت یک
+    <strong>صورتک خندان</strong> 🙂 و پنل وضعیت اکسپرت ظاهر می‌شود.</li>
+  </ol>
+
+  <div class="note warn">
+    <b>صورتک غمگین دیدید؟</b>
+    <p>یعنی معاملات خودکار غیرفعال است. دکمه Algo Trading را چک کنید و مطمئن شوید
+    بروکرتان اجازه معاملات خودکار روی حساب را داده است.</p>
+  </div>
+
+  <span class="page-num">۴</span><span class="page-tag">راهنمای اکسپرت SP2L — متاتریدر ۵</span>
+</section>
+
+<!-- =========================================================== 3 -->
+<section class="page">
+  <h2><span class="n">۳</span>اولین اجرا روی حساب دمو</h2>
+
+  <p>پیش از هر تنظیم پیچیده‌ای، با این پیکربندی محافظه‌کارانه شروع کنید:</p>
+
+  <table>
+    <thead><tr><th style="width:44%">پارامتر</th><th style="width:20%" class="center">مقدار شروع</th><th>چرا</th></tr></thead>
+    <tbody>
+      <tr><td><code>RiskPercent</code></td><td class="center">۰٫۵</td><td>نصف حد معمول، تا اشتباهات اولیه گران تمام نشود</td></tr>
+      <tr><td><code>BreakConfirm</code></td><td class="center">BREAK_CLOSE</td><td>سخت‌گیرانه‌تر، فیک‌اوت کمتر</td></tr>
+      <tr><td><code>EntryOrder</code></td><td class="center">ENTRY_MARKET</td><td>همیشه فعال می‌شود؛ رفتارش قابل‌پیش‌بینی‌تر است</td></tr>
+      <tr><td><code>RiskReward</code></td><td class="center">۱٫۰</td><td>ساده‌ترین حالت برای ارزیابی وین‌ریت خالص</td></tr>
+      <tr><td><code>MaxTradesPerDay</code></td><td class="center">۳</td><td>جلوگیری از انفجار تعداد معامله</td></tr>
+      <tr><td><code>MaxDailyLossR</code></td><td class="center">۲٫۰</td><td>سقف ضرر روزانه — مهم‌ترین محافظ شما</td></tr>
+      <tr><td><code>UsePartial</code></td><td class="center">false</td><td>اول رفتار پایه را ببینید، بعد لایه اضافه کنید</td></tr>
+      <tr><td><code>BeMode</code></td><td class="center">BE_OFF</td><td>همان دلیل بالا</td></tr>
+      <tr><td><code>ShowPanel</code></td><td class="center">true</td><td>برای رصد وضعیت لحظه‌ای</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note ok">
+    <b>روش درست ارزیابی</b>
+    <p>هر بار فقط <strong>یک پارامتر</strong> را تغییر دهید و حداقل ۳۰ تا ۵۰ معامله
+    نتیجه بگیرید. اگر چند چیز را هم‌زمان عوض کنید، هیچ‌وقت نمی‌فهمید کدام تغییر اثر
+    داشته است.</p>
+  </div>
+
+  <h3>هفته اول: فقط رصد</h3>
+  <p>در هفته اول بگذارید اکسپرت روی دمو کار کند و هر روز این‌ها را چک کنید:</p>
+  <ul>
+    <li>پنل چارت: تعداد معاملات امروز و برایند R</li>
+    <li>تب <strong>Experts</strong>: دلیل رد شدن سیگنال‌ها</li>
+    <li>تب <strong>Trade</strong> و <strong>History</strong>: کیفیت ورودها و خروج‌ها</li>
+    <li>آیا حجم‌های محاسبه‌شده منطقی‌اند؟</li>
+  </ul>
+
+  <div class="note warn">
+    <b>نکته درباره ساعت سرور</b>
+    <p>پارامترهای <code>SessionStart</code> و <code>SessionEnd</code> به
+    <strong>وقت سرور بروکر</strong> هستند، نه وقت محلی شما. ساعت سرور را از گوشه
+    پنجره Market Watch ببینید و اختلافش را با ساعت خودتان یادداشت کنید.</p>
+  </div>
+
+  <span class="page-num">۵</span><span class="page-tag">راهنمای اکسپرت SP2L — متاتریدر ۵</span>
+</section>
+
+<!-- =========================================================== 4 -->
+<section class="page">
+  <h2><span class="n">۴</span>منطق معاملاتی و زمان‌بندی اجرا</h2>
+
+  <h3>چرخه تصمیم‌گیری</h3>
+  <div class="fig">
+    <svg viewBox="0 0 640 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="چرخه حالت اکسپرت">
+      <rect x="0" y="0" width="640" height="200" fill="#f7fafd"/>
+      <g font-family="Vazirmatn" font-size="12" text-anchor="middle">
+        <rect x="500" y="30" width="120" height="46" rx="8" fill="#eef5fc" stroke="#0f6ab4"/>
+        <text x="560" y="52" fill="#0a4c80">۱ — بی‌کار</text>
+        <text x="560" y="68" font-size="9.5" fill="#5b6b80">IDLE</text>
+
+        <rect x="340" y="30" width="120" height="46" rx="8" fill="#edf8f5" stroke="#0f8f7a"/>
+        <text x="400" y="52" fill="#0f8f7a">۲ — اسپایک</text>
+        <text x="400" y="68" font-size="9.5" fill="#5b6b80">SPIKE</text>
+
+        <rect x="180" y="30" width="120" height="46" rx="8" fill="#fdf6e8" stroke="#b5741a"/>
+        <text x="240" y="52" fill="#b5741a">۳ — پولبک</text>
+        <text x="240" y="68" font-size="9.5" fill="#5b6b80">PULLBACK</text>
+
+        <rect x="20" y="30" width="120" height="46" rx="8" fill="#0f6ab4" stroke="#0a4c80"/>
+        <text x="80" y="52" fill="#fff">۴ — ورود</text>
+        <text x="80" y="68" font-size="9.5" fill="#cfe6fa">ENTRY</text>
+
+        <rect x="180" y="128" width="280" height="42" rx="8" fill="#fdf0ee" stroke="#b3392f"/>
+        <text x="320" y="147" fill="#b3392f">ابطال یا انقضا ← بازگشت به بی‌کار</text>
+        <text x="320" y="162" font-size="9.5" fill="#5b6b80">Cancelled / Expired</text>
+      </g>
+      <g stroke="#0f6ab4" fill="none" stroke-width="1.6">
+        <path d="M498,53 L464,53" marker-end="url(#a2)"/>
+        <path d="M338,53 L304,53" marker-end="url(#a2)"/>
+        <path d="M178,53 L144,53" marker-end="url(#a2)"/>
+      </g>
+      <g stroke="#b3392f" fill="none" stroke-width="1.3" stroke-dasharray="5 3">
+        <path d="M400,78 L400,126"/>
+        <path d="M240,78 L240,126"/>
+      </g>
+      <defs><marker id="a2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L6,3 L0,6 z" fill="#0f6ab4"/></marker></defs>
+    </svg>
+    <div class="cap">ماشین حالت اکسپرت: از بی‌کاری تا ورود، با دو مسیر خروج (ابطال و انقضا)</div>
+  </div>
+
+  <h3>زمان‌بندی: چرا فقط روی کندل بسته‌شده؟</h3>
+  <p>اکسپرت <strong>همه تصمیم‌ها را روی کندل‌های کامل‌شده</strong> می‌گیرد. مزیت‌ها:</p>
+  <ul>
+    <li>سیگنال‌ها <strong>ثابت</strong> می‌مانند و وسط کندل عوض نمی‌شوند؛</li>
+    <li>رفتار اکسپرت با بک‌تست پایتون و اندیکاتور تریدینگ‌ویو یکسان است؛</li>
+    <li>از نویز داخل‌کندلی که باعث ورودهای اشتباه می‌شود جلوگیری می‌کند.</li>
+  </ul>
+
+  <div class="note ok">
+    <b>ورود مارکت دقیقاً چه زمانی ارسال می‌شود؟</b>
+    <p>لحظه‌ای که کندلِ شکست بسته می‌شود و کندل بعدی باز می‌شود، اکسپرت سفارش را
+    می‌فرستد. یعنی قیمت ورود شما عملاً <strong>اوپن کندل بعدی</strong> است — دقیقاً
+    همان چیزی که در بک‌تست شبیه‌سازی شده است.</p>
+  </div>
+
+  <h3>مدیریت پوزیشن‌ها</h3>
+  <p>برخلاف تصمیم‌های ورود، مدیریت پوزیشن باز (پارشال، ریسک‌فری، تریلینگ) در
+  <strong>هر تیک</strong> بررسی می‌شود تا واکنش سریع‌تری داشته باشد.</p>
+
+  <span class="page-num">۶</span><span class="page-tag">راهنمای اکسپرت SP2L — متاتریدر ۵</span>
+</section>
+
+<!-- =========================================================== 5 -->
+<section class="page">
+  <h2><span class="n">۵</span>چهار آپشن ورود</h2>
+
+  <p>دو پارامتر <code>BreakConfirm</code> و <code>EntryOrder</code> با هم چهار حالت می‌سازند:</p>
+
+  <table>
+    <thead>
+      <tr><th style="width:9%" class="center">آپشن</th><th style="width:23%">BreakConfirm</th><th style="width:23%">EntryOrder</th><th>رفتار</th></tr>
+    </thead>
+    <tbody>
+      <tr><td class="center"><strong>۱</strong></td><td><code>BREAK_TOUCH</code></td><td><code>ENTRY_MARKET</code></td><td>شکست با سایه یا کلوز ← مارکت روی اوپن کندل بعدی</td></tr>
+      <tr><td class="center"><strong>۲</strong></td><td><code>BREAK_TOUCH</code></td><td><code>ENTRY_LIMIT</code></td><td>شکست با سایه یا کلوز ← لیمیت روی خط B</td></tr>
+      <tr><td class="center"><strong>۳</strong></td><td><code>BREAK_CLOSE</code></td><td><code>ENTRY_MARKET</code></td><td>شکست فقط با کلوز ← مارکت روی اوپن کندل بعدی</td></tr>
+      <tr><td class="center"><strong>۴</strong></td><td><code>BREAK_CLOSE</code></td><td><code>ENTRY_LIMIT</code></td><td>شکست فقط با کلوز ← لیمیت روی خط B</td></tr>
+    </tbody>
+  </table>
+
+  <h3>ورود مارکت</h3>
+  <p>سفارش با قیمت بازار در لحظه باز شدن کندل بعد از شکست ارسال می‌شود.</p>
+  <div class="grid">
+    <div class="card"><h4>مزیت</h4><p>همیشه فعال می‌شود؛ هیچ حرکتی را از دست نمی‌دهید.</p></div>
+    <div class="card"><h4>عیب</h4><p>قیمت ورود بدتر، فاصله تا حد ضرر بیشتر، و حساسیت به لغزش (slippage) و اسپرد.</p></div>
+  </div>
+
+  <h3>ورود لیمیت</h3>
+  <p>یک سفارش <span dir="ltr">Buy Limit</span> یا <span dir="ltr">Sell Limit</span> دقیقاً
+  روی سطح B گذاشته می‌شود و منتظر برگشت قیمت می‌ماند.</p>
+  <div class="grid">
+    <div class="card"><h4>مزیت</h4><p>قیمت ورود بهتر، حد ضرر نزدیک‌تر، و ریسک‌به‌ریوارد بزرگ‌تر.</p></div>
+    <div class="card"><h4>عیب</h4><p>ممکن است <strong>هرگز پر نشود</strong> و حرکت را کامل از دست بدهید.</p></div>
+  </div>
+
+  <div class="note">
+    <b>مهلت سفارش لیمیت</b>
+    <p>اگر قیمت تا <code>LimitWaitBars</code> کندل به سطح برنگردد، اکسپرت سفارش را
+    <strong>خودش لغو می‌کند</strong> و در تب Experts پیام
+    <span dir="ltr">«limit not activated within the window - cancelled»</span> ثبت
+    می‌شود. این کار عمدی است تا سفارش‌های قدیمی روی سطوح بی‌ربط باقی نمانند.</p>
+  </div>
+
+  <div class="note warn">
+    <b>لیمیت رد شد و پیام «price already above the limit level» گرفتم</b>
+    <p>یعنی وقتی اکسپرت خواست سفارش را بگذارد، قیمت از سطح گذشته بود و لیمیت خرید
+    باید پایین‌تر از قیمت فعلی باشد. این یک خطا نیست — فقط یعنی آن فرصت با حالت
+    لیمیت قابل استفاده نبود.</p>
+  </div>
+
+  <span class="page-num">۷</span><span class="page-tag">راهنمای اکسپرت SP2L — متاتریدر ۵</span>
+</section>
+
+<!-- =========================================================== 6 -->
+<section class="page">
+  <h2><span class="n">۶</span>پارامترها: تشخیص اسپایک</h2>
+
+  <table>
+    <thead><tr><th style="width:32%">پارامتر</th><th style="width:14%" class="center">پیش‌فرض</th><th>توضیح</th></tr></thead>
+    <tbody>
+      <tr><td><code>MinSpikeBars</code></td><td class="center">۳</td><td>حداقل کندل‌های متوالی هم‌جهت که یک اسپایک را می‌سازند</td></tr>
+      <tr><td><code>MinBodyRatio</code></td><td class="center">۰٫۵</td><td>حداقل نسبت بدنه به کل رنج کندل؛ بالاتر یعنی فقط کندل‌های قاطع</td></tr>
+      <tr><td><code>DojiTolerance</code></td><td class="center">۱</td><td>چند کندل کم‌بدنه داخل اسپایک قابل چشم‌پوشی است</td></tr>
+      <tr><td><code>MaxDojiBodyRatio</code></td><td class="center">۰٫۲۵</td><td>آستانه‌ای که زیر آن کندل «دوجی» شمرده می‌شود</td></tr>
+      <tr><td><code>RequireGap</code></td><td class="center">true</td><td>الزام وجود گپ قیمتی (FVG) داخل اسپایک</td></tr>
+      <tr><td><code>PowerMult</code></td><td class="center">۱٫۵</td><td>طول اسپایک باید از این ضریب × ATR بیشتر باشد (۰ = خاموش)</td></tr>
+      <tr><td><code>AtrLen</code></td><td class="center">۱۴</td><td>دوره ATR برای فیلتر قدرت و تریلینگ استاپ</td></tr>
+    </tbody>
+  </table>
+
+  <h3>راهنمای تنظیم عملی</h3>
+  <table>
+    <thead><tr><th style="width:34%">مشکل</th><th>راه‌حل</th></tr></thead>
+    <tbody>
+      <tr><td>هیچ معامله‌ای نمی‌گیرد</td><td><code>PowerMult</code> را به ۱٫۰ کاهش دهید؛ اگر باز هم نشد <code>RequireGap</code> را false کنید</td></tr>
+      <tr><td>معاملات زیاد و بی‌کیفیت</td><td><code>MinBodyRatio</code> را به ۰٫۶ و <code>PowerMult</code> را به ۲٫۰ ببرید</td></tr>
+      <tr><td>ورودها دیر می‌رسند</td><td><code>MinSpikeBars</code> را به ۲ کاهش دهید (احتیاط: کیفیت پایین می‌آید)</td></tr>
+      <tr><td>در بازار رنج ضرر می‌دهد</td><td><code>PowerMult</code> را بالا ببرید و فیلتر سشن را روشن کنید</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <b>گپ قیمتی (FVG) چیست و چرا مهم است؟</b>
+    <p>وقتی سه کندل چنان سریع حرکت می‌کنند که کف کندل سوم بالاتر از سقف کندل اول
+    بماند، یعنی بازار فرصت معامله متعادل نداشته است. این «حفره» نشانه ورود سفارش‌های
+    سنگین است و کیفیت اسپایک را تأیید می‌کند. خاموش کردن <code>RequireGap</code> تعداد
+    سیگنال را زیاد می‌کند اما کیفیت را پایین می‌آورد.</p>
+  </div>
+
+  <span class="page-num">۸</span><span class="page-tag">راهنمای اکسپرت SP2L — متاتریدر ۵</span>
+</section>
+
+<!-- =========================================================== 7 -->
+<section class="page">
+  <h2><span class="n">۷</span>پارامترها: چرخه ستاپ و ورود</h2>
+
+  <h3>Setup lifecycle</h3>
+  <table>
+    <thead><tr><th style="width:32%">پارامتر</th><th style="width:14%" class="center">پیش‌فرض</th><th>توضیح</th></tr></thead>
+    <tbody>
+      <tr><td><code>MaxRetrace</code></td><td class="center">۱٫۰</td><td>حداکثر عمق اصلاح نسبت به طول اسپایک؛ بیشتر از آن ستاپ باطل می‌شود</td></tr>
+      <tr><td><code>MaxWaitBars</code></td><td class="center">۲۰</td><td>مهلت رخ دادن شکست بعد از اسپایک</td></tr>
+      <tr><td><code>RiskReward</code></td><td class="center">۱٫۰</td><td>حد سود بر حسب برابر ریسک</td></tr>
+      <tr><td><code>SlBufferPct</code></td><td class="center">۰٫۰</td><td>فاصله اضافی حد ضرر از نقطه A (کسری از طول اسپایک)</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Entry trigger</h3>
+  <table>
+    <thead><tr><th style="width:32%">پارامتر</th><th style="width:20%" class="center">پیش‌فرض</th><th>توضیح</th></tr></thead>
+    <tbody>
+      <tr><td><code>BreakConfirm</code></td><td class="center">BREAK_CLOSE</td><td>تأیید شکست: فقط کلوز یا لمس با سایه</td></tr>
+      <tr><td><code>EntryOrder</code></td><td class="center">ENTRY_MARKET</td><td>نوع سفارش: مارکت یا لیمیت</td></tr>
+      <tr><td><code>LimitWaitBars</code></td><td class="center">۱۰</td><td>مهلت پر شدن لیمیت پیش از لغو خودکار</td></tr>
+      <tr><td><code>AllowConcurrent</code></td><td class="center">false</td><td>گرفتن سیگنال جدید حتی وقتی پوزیشن باز است</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note danger">
+    <b>هشدار درباره AllowConcurrent</b>
+    <p>با <code>true</code> کردن این پارامتر، ریسک شما <strong>جمع می‌شود</strong>. سه
+    پوزیشن هم‌زمان با ریسک ۱٪ یعنی ۳٪ روی خط. اگر روشنش می‌کنید، حتماً
+    <code>RiskPercent</code> را کم و <code>MaxTradesPerDay</code> را محدود کنید.</p>
+  </div>
+
+  <h3>Execution</h3>
+  <table>
+    <thead><tr><th style="width:32%">پارامتر</th><th style="width:20%" class="center">پیش‌فرض</th><th>توضیح</th></tr></thead>
+    <tbody>
+      <tr><td><code>MagicNumber</code></td><td class="center">۲۰۲۶۰۷۲۷</td><td>شناسه یکتای اکسپرت؛ برای هر نسخه/چارت متفاوت بگذارید</td></tr>
+      <tr><td><code>SlippagePoints</code></td><td class="center">۲۰</td><td>حداکثر لغزش قابل قبول هنگام اجرای سفارش مارکت</td></tr>
+      <tr><td><code>ShowPanel</code></td><td class="center">true</td><td>نمایش پنل وضعیت روی چارت</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <b>نقش MagicNumber</b>
+    <p>اکسپرت فقط پوزیشن‌هایی را مدیریت می‌کند که خودش با این شناسه باز کرده باشد.
+    معاملات دستی شما یا اکسپرت‌های دیگر دست‌نخورده می‌مانند. اگر دو نسخه با شناسه
+    یکسان روی دو چارت اجرا شوند، در مدیریت پوزیشن‌های هم دخالت می‌کنند.</p>
+  </div>
+
+  <span class="page-num">۹</span><span class="page-tag">راهنمای اکسپرت SP2L — متاتریدر ۵</span>
+</section>
+
+<!-- =========================================================== 8 -->
+<section class="page">
+  <h2><span class="n">۸</span>مدیریت ریسک و حجم پوزیشن</h2>
+
+  <h3>حجم چطور محاسبه می‌شود؟</h3>
+  <p>اکسپرت <strong>حجم ثابت نمی‌گیرد</strong>. برای هر معامله:</p>
+
+  <pre><span class="c">// ۱) مبلغ قابل ریسک</span>
+riskMoney = AccountEquity * RiskPercent / 100
+
+<span class="c">// ۲) زیان هر لات در فاصله حد ضرر</span>
+lossPerLot = (slDistance / tickSize) * tickValue
+
+<span class="c">// ۳) حجم نهایی (رند شده به گام حجم نماد)</span>
+lots = riskMoney / lossPerLot</pre>
+
+  <p>یعنی هرچه حد ضرر دورتر باشد، حجم کمتر می‌شود تا مبلغ ریسک ثابت بماند.</p>
+
+  <h3>یک مثال عددی</h3>
+  <table>
+    <thead><tr><th style="width:50%">فرض</th><th>مقدار</th></tr></thead>
+    <tbody>
+      <tr><td>اکوییتی حساب</td><td>۱۰٬۰۰۰ دلار</td></tr>
+      <tr><td><code>RiskPercent</code></td><td>۱٪ ← یعنی ۱۰۰ دلار ریسک</td></tr>
+      <tr><td>فاصله حد ضرر (طلا)</td><td>۳ دلار</td></tr>
+      <tr><td>ارزش هر لات به ازای ۱ دلار حرکت</td><td>۱۰۰ دلار</td></tr>
+      <tr><td><strong>حجم محاسبه‌شده</strong></td><td><strong>۰٫۳۳ لات</strong> ← زیان در حد ضرر ≈ ۱۰۰ دلار</td></tr>
+    </tbody>
+  </table>
+
+  <h3>محدودیت‌های بروکر</h3>
+  <p>حجم نهایی همیشه به محدوده مجاز نماد محدود می‌شود: کمتر از حداقل و بیشتر از
+  حداکثر حجم نمی‌شود و به گام حجم مجاز (رو به پایین) رند می‌شود.</p>
+
+  <div class="note warn">
+    <b>پیام «computed lot size is zero»</b>
+    <p>یعنی مبلغ ریسک شما آن‌قدر کم است که حتی به حداقل حجم نماد هم نمی‌رسد. یا
+    <code>RiskPercent</code> را بالا ببرید، یا نمادی با حداقل حجم کوچک‌تر انتخاب کنید،
+    یا حساب با موجودی بیشتر بگذارید. اکسپرت در این حالت <strong>عمداً</strong> معامله
+    نمی‌گیرد تا ریسک شما از حد تعیین‌شده بیشتر نشود.</p>
+  </div>
+
+  <div class="note danger">
+    <b>درصد ریسک منطقی چقدر است؟</b>
+    <p>برای اکثر معامله‌گران <strong>۰٫۵٪ تا ۱٪</strong> در هر معامله. بالای ۲٪ یعنی ۱۰
+    ضرر پشت‌سرهم تقریباً یک‌پنجم حساب را می‌برد — و چنین رشته‌ای در هر استراتژی، حتی
+    خوب، اتفاق می‌افتد.</p>
+  </div>
+
+  <span class="page-num">۱۰</span><span class="page-tag">راهنمای اکسپرت SP2L — متاتریدر ۵</span>
+</section>
+
+<!-- =========================================================== 9 -->
+<section class="page">
+  <h2><span class="n">۹</span>پارشال، ریسک‌فری و تریلینگ</h2>
+
+  <table>
+    <thead><tr><th style="width:32%">پارامتر</th><th style="width:18%" class="center">پیش‌فرض</th><th>توضیح</th></tr></thead>
+    <tbody>
+      <tr><td><code>UsePartial</code></td><td class="center">false</td><td>فعال‌سازی پارشال</td></tr>
+      <tr><td><code>PartialRR</code></td><td class="center">۱٫۰</td><td>در چند برابر ریسک، پارشال گرفته شود</td></tr>
+      <tr><td><code>PartialPercent</code></td><td class="center">۵۰</td><td>چند درصد پوزیشن بسته شود</td></tr>
+      <tr><td><code>BeMode</code></td><td class="center">BE_OFF</td><td><code>BE_RR</code> یا <code>BE_AFTER_PARTIAL</code></td></tr>
+      <tr><td><code>BeTriggerRR</code></td><td class="center">۱٫۰</td><td>در چند R استاپ به نقطه ورود منتقل شود</td></tr>
+      <tr><td><code>BeOffsetR</code></td><td class="center">۰٫۰</td><td>چند R سود قفل شود (۰ = دقیقاً سربه‌سر)</td></tr>
+      <tr><td><code>TrailAtrMult</code></td><td class="center">۰٫۰</td><td>ضریب تریلینگ ATR (۰ = خاموش)</td></tr>
+    </tbody>
+  </table>
+
+  <h3>پارشال چطور اجرا می‌شود؟</h3>
+  <p>وقتی قیمت به سطح <code>PartialRR</code> برسد، اکسپرت درصد تعیین‌شده از حجم را
+  می‌بندد و بقیه پوزیشن با همان حد سود باز می‌ماند.</p>
+
+  <div class="note warn">
+    <b>وقتی حجم برای تقسیم کافی نیست</b>
+    <p>اگر حجم پوزیشن آن‌قدر کوچک باشد که نصف کردنش زیر حداقل حجم نماد برود، پارشال
+    <strong>انجام نمی‌شود</strong> و در لاگ پیام
+    <span dir="ltr">«partial skipped (volume below the broker minimum)»</span> ثبت
+    می‌شود. این وضعیت در حساب‌های کوچک رایج است.</p>
+  </div>
+
+  <h3>دو حالت ریسک‌فری</h3>
+  <div class="grid">
+    <div class="card">
+      <h4>BE_RR</h4>
+      <p>به‌محض رسیدن قیمت به <code>BeTriggerRR</code>، حد ضرر به نقطه ورود می‌رود.
+      مستقل از پارشال عمل می‌کند.</p>
+    </div>
+    <div class="card">
+      <h4>BE_AFTER_PARTIAL</h4>
+      <p>حد ضرر فقط بعد از گرفته شدن پارشال جابه‌جا می‌شود. منطقی‌تر است چون تا آن
+      لحظه بخشی از سود تثبیت شده.</p>
+    </div>
+  </div>
+
+  <h3>تریلینگ استاپ ATR</h3>
+  <p>حد ضرر با فاصله <code>TrailAtrMult × ATR</code> قیمت را دنبال می‌کند و
+  <strong>فقط سفت می‌شود</strong>. برای روزهای رونددار مفید است.</p>
+
+  <div class="note ok">
+    <b>حفاظت از استاپ‌لول بروکر</b>
+    <p>اکسپرت پیش از هر جابه‌جایی حد ضرر، حداقل فاصله مجاز بروکر
+    (<span dir="ltr">SYMBOL_TRADE_STOPS_LEVEL</span>) را رعایت می‌کند تا سفارش رد نشود.</p>
+  </div>
+
+  <div class="note">
+    <b>معاوضه واقعی این ابزارها</b>
+    <p>پارشال و ریسک‌فری ضررها را کوچک می‌کنند ولی بخشی از حرکت‌های بزرگ را هم از
+    دست می‌دهند. در تست ما روی دیتای مصنوعی، فعال کردنشان میانگین نتیجه را
+    <strong>کاهش</strong> داد. حتماً روی دیتای واقعی خودتان با و بدون آن‌ها بک‌تست
+    بگیرید.</p>
+  </div>
+
+  <span class="page-num">۱۱</span><span class="page-tag">راهنمای اکسپرت SP2L — متاتریدر ۵</span>
+</section>
+
+<!-- =========================================================== 10 -->
+<section class="page">
+  <h2><span class="n">۱۰</span>گاردهای روزانه و فیلتر سشن</h2>
+
+  <table>
+    <thead><tr><th style="width:32%">پارامتر</th><th style="width:20%" class="center">پیش‌فرض</th><th>توضیح</th></tr></thead>
+    <tbody>
+      <tr><td><code>MaxTradesPerDay</code></td><td class="center">۰ (خاموش)</td><td>سقف تعداد معامله در روز</td></tr>
+      <tr><td><code>MaxDailyLossR</code></td><td class="center">۰٫۰</td><td>توقف معامله بعد از این مقدار ضرر (بر حسب R) در روز</td></tr>
+      <tr><td><code>UseSession</code></td><td class="center">false</td><td>محدود کردن ورود به ساعات مشخص</td></tr>
+      <tr><td><code>SessionStart</code></td><td class="center">13:30</td><td>شروع سشن به وقت سرور بروکر</td></tr>
+      <tr><td><code>SessionEnd</code></td><td class="center">20:00</td><td>پایان سشن به وقت سرور بروکر</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note danger">
+    <b>گارد ضرر روزانه: مهم‌ترین تنظیم این اکسپرت</b>
+    <p>بدترین دشمن یک استراتژی خوب، «روز بد» است. بدون این گارد، یک بازار پرنوسان
+    می‌تواند در چند ساعت چندین ضرر پشت‌سرهم بزند. پیشنهاد جدی:
+    <code>MaxDailyLossR = 2</code> و <code>MaxTradesPerDay = 3</code>.</p>
+  </div>
+
+  <h3>محاسبه ضرر روزانه چطور انجام می‌شود؟</h3>
+  <p>اکسپرت سود و زیان <strong>محقق‌شده</strong> امروز روی همین نماد و با همین
+  <code>MagicNumber</code> را از تاریخچه معاملات می‌خواند (شامل کمیسیون و سواپ) و آن را
+  بر مبلغ ریسک ابتدای روز تقسیم می‌کند تا به واحد R برسد.</p>
+
+  <div class="note warn">
+    <b>تفاوت با نسخه پایتون</b>
+    <p>در بک‌تستر پایتون، R هر معامله دقیقاً از فاصله ورود تا حد ضرر محاسبه می‌شود.
+    در اکسپرت، از سود/زیان واقعی تقسیم بر ریسک پول ابتدای روز <strong>تخمین</strong>
+    زده می‌شود. این دو معمولاً نزدیک‌اند ولی دقیقاً یکسان نیستند.</p>
+  </div>
+
+  <h3>فیلتر سشن</h3>
+  <p>استراتژی در سشن‌های پرحجم — به‌ویژه <strong>نیویورک</strong> — بهتر عمل می‌کند.
+  با روشن کردن <code>UseSession</code> فقط در بازه تعیین‌شده معامله باز می‌شود.</p>
+
+  <div class="note">
+    <b>پیدا کردن ساعت سرور</b>
+    <p>در پنجره <strong>Market Watch</strong> ساعت سرور نمایش داده می‌شود. اختلاف آن
+    با ساعت محلی خودتان را حساب کنید و بازه سشن را بر همان اساس تنظیم کنید. توجه کنید
+    بسیاری از بروکرها ساعت تابستانی دارند و این اختلاف در طول سال تغییر می‌کند.</p>
+  </div>
+
+  <p>سشن‌هایی که از نیمه‌شب عبور می‌کنند (مثلاً <span dir="ltr">22:00–03:00</span>) هم
+  پشتیبانی می‌شوند.</p>
+
+  <span class="page-num">۱۲</span><span class="page-tag">راهنمای اکسپرت SP2L — متاتریدر ۵</span>
+</section>
+
+<!-- =========================================================== 11 -->
+<section class="page">
+  <h2><span class="n">۱۱</span>پنل وضعیت و خواندن لاگ‌ها</h2>
+
+  <h3>پنل روی چارت</h3>
+  <table>
+    <thead><tr><th style="width:26%">ردیف</th><th>معنی</th></tr></thead>
+    <tbody>
+      <tr><td><strong>State</strong></td><td>فاز فعلی: <code>IDLE</code> / <code>SPIKE</code> / <code>PULLBACK</code></td></tr>
+      <tr><td><strong>Dir</strong></td><td>جهت ستاپ فعلی: LONG یا SHORT</td></tr>
+      <tr><td><strong>B / A</strong></td><td>قیمت سطح ورود و لنگر حد ضرر</td></tr>
+      <tr><td><strong>Break / Entry</strong></td><td>تنظیم فعلی تأیید شکست و نوع سفارش</td></tr>
+      <tr><td><strong>Positions / Orders</strong></td><td>تعداد پوزیشن باز و سفارش‌های در انتظار</td></tr>
+      <tr><td><strong>Today</strong></td><td>تعداد معاملات امروز و برایند R</td></tr>
+    </tbody>
+  </table>
+
+  <h3>تب Experts — منبع اصلی عیب‌یابی</h3>
+  <p>پنجره Toolbox (کلید <span dir="ltr">Ctrl+T</span>) را باز و به تب
+  <strong>Experts</strong> بروید. اکسپرت هر تصمیمش را آنجا ثبت می‌کند:</p>
+
+  <table>
+    <thead><tr><th style="width:52%">پیام</th><th>معنی</th></tr></thead>
+    <tbody>
+      <tr><td><span dir="ltr">signal skipped (outside the session)</span></td><td>سیگنال خارج از سشن رخ داد</td></tr>
+      <tr><td><span dir="ltr">signal skipped (already in a trade / order)</span></td><td>پوزیشن یا سفارش باز وجود داشت</td></tr>
+      <tr><td><span dir="ltr">signal skipped (daily guard)</span></td><td>گارد روزانه فعال شده بود</td></tr>
+      <tr><td><span dir="ltr">computed lot size is zero</span></td><td>حجم محاسبه‌شده زیر حداقل مجاز بود</td></tr>
+      <tr><td><span dir="ltr">limit not activated within the window</span></td><td>سفارش لیمیت پر نشد و لغو شد</td></tr>
+      <tr><td><span dir="ltr">market order failed, retcode=…</span></td><td>بروکر سفارش را رد کرد (کد خطا را ببینید)</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note ok">
+    <b>عادت خوب</b>
+    <p>هر روز یک‌بار لاگ‌ها را مرور کنید. اگر اکسپرت معامله‌ای نگرفته، دلیلش
+    <strong>همیشه</strong> آنجا نوشته شده است. این سریع‌ترین راه فهمیدن رفتار سیستم
+    است.</p>
+  </div>
+
+  <h3>تب Journal</h3>
+  <p>خطاهای سطح پایین‌تر (اتصال به سرور، رد شدن سفارش توسط بروکر، مشکلات مجوز) در
+  تب <strong>Journal</strong> ثبت می‌شوند. اگر اکسپرت اصلاً کار نمی‌کند، اول اینجا را
+  ببینید.</p>
+
+  <span class="page-num">۱۳</span><span class="page-tag">راهنمای اکسپرت SP2L — متاتریدر ۵</span>
+</section>
+
+<!-- =========================================================== 12 -->
+<section class="page">
+  <h2><span class="n">۱۲</span>بک‌تست در Strategy Tester</h2>
+
+  <ol class="steps">
+    <li>کلید <span dir="ltr">Ctrl+R</span> را بزنید تا <strong>Strategy Tester</strong> باز شود.</li>
+    <li>در تب Settings، اکسپرت <strong>SP2L_Poursamadi_EA</strong> را انتخاب کنید.</li>
+    <li>نماد و تایم‌فریم هدف را انتخاب کنید (مثلاً <span dir="ltr">XAUUSD</span> و <span dir="ltr">M5</span>).</li>
+    <li>در قسمت <strong>Modelling</strong> گزینه
+    <strong>Every tick based on real ticks</strong> را انتخاب کنید.</li>
+    <li>بازه تاریخی و موجودی اولیه را تعیین کنید.</li>
+    <li>در تب <strong>Inputs</strong> پارامترها را تنظیم کنید.</li>
+    <li><strong>Start</strong> را بزنید.</li>
+  </ol>
+
+  <div class="note warn">
+    <b>چرا حتماً «real ticks»؟</b>
+    <p>مدل‌های ساده‌تر، حرکت داخل کندل را تقریب می‌زنند و نتیجه را
+    <strong>خوش‌بینانه</strong> نشان می‌دهند — مخصوصاً وقتی حد ضرر، پارشال و تریلینگ
+    دارید که همه به ترتیب دقیق قیمت‌ها داخل کندل حساس‌اند.</p>
+  </div>
+
+  <h3>مقایسه با بک‌تستر پایتون</h3>
+  <p>پروژه یک بک‌تستر پایتون هم دارد. برای مقایسه، هر دو را با تنظیمات یکسان روی
+  همان بازه اجرا کنید:</p>
+
+  <pre><span class="c"># همان تنظیمات آپشن ۳ (کلوز + مارکت)</span>
+python3 -m sp2l XAUUSD_M5.csv --setup sp2l \
+    --break-confirm close --entry-mode market \
+    --rr 1.0 --daily --trades</pre>
+
+  <p>اگر اختلاف <strong>معنادار</strong> دیدید، معمولاً یکی از این‌هاست: اسپرد و
+  کمیسیون واقعی که در پایتون لحاظ نشده، تفاوت دیتای بروکر با فایل CSV شما، یا
+  تنظیمی که در دو طرف یکسان نیست.</p>
+
+  <h3>بهینه‌سازی پارامترها</h3>
+  <div class="note danger">
+    <b>دام بیش‌برازش (Overfitting)</b>
+    <p>Strategy Tester قابلیت Optimization دارد که بهترین ترکیب پارامتر را پیدا
+    می‌کند. اما پارامترهایی که روی گذشته «عالی» هستند اغلب در آینده شکست می‌خورند.
+    اگر بهینه‌سازی می‌کنید، حتماً نتیجه را روی یک بازه زمانی <strong>دیده‌نشده</strong>
+    (forward test) اعتبارسنجی کنید و از مقادیر افراطی پرهیز کنید.</p>
+  </div>
+
+  <span class="page-num">۱۴</span><span class="page-tag">راهنمای اکسپرت SP2L — متاتریدر ۵</span>
+</section>
+
+<!-- =========================================================== 13 -->
+<section class="page">
+  <h2><span class="n">۱۳</span>تفاوت‌ها با نسخه پایتون و اندیکاتور</h2>
+
+  <p>هر سه پیاده‌سازی از یک منطق پیروی می‌کنند، ولی چند تفاوت آگاهانه دارند:</p>
+
+  <table>
+    <thead><tr><th style="width:26%">موضوع</th><th style="width:37%">اکسپرت MT5</th><th style="width:37%">پایتون / اندیکاتور</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>فیلترهای کیفیت پولبک</td>
+        <td>پیاده نشده (معادل حداقل ۱ کندل پولبک)</td>
+        <td>پایتون دارای <code>min_pullback_bars</code> و <code>min_retrace</code></td>
+      </tr>
+      <tr>
+        <td>محاسبه ضرر روزانه</td>
+        <td>از سود/زیان محقق‌شده واقعی (با کمیسیون و سواپ)</td>
+        <td>از R دقیق هر معامله</td>
+      </tr>
+      <tr>
+        <td>هزینه معامله</td>
+        <td>پارامتر ندارد — اسپرد و کمیسیون واقعی بروکر اعمال می‌شود</td>
+        <td>پارامتر <code>cost_r</code> برای شبیه‌سازی</td>
+      </tr>
+      <tr>
+        <td>استراتژی Pro BTB</td>
+        <td>ندارد</td>
+        <td>پایتون و اندیکاتور جداگانه دارند</td>
+      </tr>
+      <tr>
+        <td>پر شدن سفارش لیمیت</td>
+        <td>واقعی — بروکر تصمیم می‌گیرد</td>
+        <td>فرض می‌شود لمس سطح یعنی پر شدن</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>رفتار پس از ری‌استارت یا کامپایل مجدد</h3>
+  <div class="note warn">
+    <b>یک محدودیت که باید بدانید</b>
+    <p>اگر اکسپرت را وقتی پوزیشن باز دارید ری‌استارت یا کامپایل مجدد کنید:</p>
+    <ul>
+      <li>حد ضرر <strong>فعلی</strong> آن پوزیشن مبنای محاسبه R گرفته می‌شود — اگر قبلاً
+      به ریسک‌فری منتقل شده باشد، R محاسبه‌شده دقیق نخواهد بود؛</li>
+      <li>آن پوزیشن دوباره در شمارنده معاملات امروز حساب می‌شود.</li>
+    </ul>
+    <p>راه‌حل ساده: اکسپرت را زمانی ری‌استارت کنید که پوزیشن بازی ندارید.</p>
+  </div>
+
+  <h3>چرا نتایج دقیقاً یکسان نمی‌شوند؟</h3>
+  <ul>
+    <li><strong>اسپرد و لغزش:</strong> در دنیای واقعی قیمت ورود و خروج دقیقاً همان
+    عددهای تئوری نیست؛</li>
+    <li><strong>دیتای بروکر:</strong> هر بروکر قیمت‌های کمی متفاوت دارد؛</li>
+    <li><strong>ترتیب داخل کندل:</strong> در بک‌تست فرض محافظه‌کارانه «اول حد ضرر»
+    است، در واقعیت به ترتیب واقعی تیک‌ها بستگی دارد.</li>
+  </ul>
+
+  <span class="page-num">۱۵</span><span class="page-tag">راهنمای اکسپرت SP2L — متاتریدر ۵</span>
+</section>
+
+<!-- =========================================================== 14 -->
+<section class="page">
+  <h2><span class="n">۱۴</span>عیب‌یابی</h2>
+
+  <h3>اکسپرت هیچ معامله‌ای نمی‌گیرد</h3>
+  <p>به‌ترتیب این‌ها را چک کنید:</p>
+  <ol class="steps">
+    <li>صورتک گوشه چارت خندان است؟ اگر نه، <strong>Algo Trading</strong> را روشن کنید.</li>
+    <li>تب <strong>Experts</strong> پیام رد شدن سیگنال دارد؟ دلیل همان‌جاست.</li>
+    <li>پنل چارت <code>IDLE</code> ثابت مانده؟ یعنی هیچ اسپایکی پیدا نمی‌شود —
+    <code>PowerMult</code> را کم و <code>RequireGap</code> را خاموش کنید.</li>
+    <li><code>UseSession</code> ناخواسته روشن نیست؟ ساعت سرور را چک کنید.</li>
+    <li>گارد روزانه فعال نشده؟ پنل تعداد معاملات امروز را نشان می‌دهد.</li>
+  </ol>
+
+  <h3>سفارش‌ها رد می‌شوند (retcode)</h3>
+  <table>
+    <thead><tr><th style="width:26%">کد رایج</th><th>معنی و راه‌حل</th></tr></thead>
+    <tbody>
+      <tr><td><span dir="ltr">10016</span></td><td>حد ضرر یا حد سود نامعتبر — معمولاً فاصله کمتر از استاپ‌لول بروکر است؛ <code>SlBufferPct</code> را کمی بالا ببرید</td></tr>
+      <tr><td><span dir="ltr">10019</span></td><td>موجودی کافی نیست — حجم بیش از توان حساب است؛ <code>RiskPercent</code> را کم کنید</td></tr>
+      <tr><td><span dir="ltr">10018</span></td><td>بازار بسته است</td></tr>
+      <tr><td><span dir="ltr">10027</span></td><td>معاملات خودکار توسط ترمینال غیرفعال شده است</td></tr>
+      <tr><td><span dir="ltr">10030</span></td><td>حالت پر کردن سفارش پشتیبانی نمی‌شود — نماد یا بروکر دیگری امتحان کنید</td></tr>
+    </tbody>
+  </table>
+
+  <h3>پارشال انجام نمی‌شود</h3>
+  <p>حجم پوزیشن برای تقسیم شدن خیلی کوچک است. یا <code>RiskPercent</code> را بالا ببرید
+  یا <code>PartialPercent</code> را تغییر دهید. پیام دقیق در تب Experts است.</p>
+
+  <h3>حد ضرر جابه‌جا نمی‌شود</h3>
+  <p>سه علت رایج: (۱) شرط ریسک‌فری هنوز فعال نشده، (۲) استاپ جدید داخل فاصله ممنوعه
+  بروکر می‌افتد، (۳) تریلینگ خاموش است (<code>TrailAtrMult = 0</code>).</p>
+
+  <h3>خطای کامپایل در MetaEditor</h3>
+  <p>مطمئن شوید فایل را کامل و بدون تغییر کپی کرده‌اید و نسخه متاتریدر شما به‌روز است
+  (اکسپرت به بیلد نسبتاً جدید MT5 نیاز دارد). متن دقیق خطا و شماره خط را یادداشت
+  کنید.</p>
+
+  <span class="page-num">۱۶</span><span class="page-tag">راهنمای اکسپرت SP2L — متاتریدر ۵</span>
+</section>
+
+<!-- =========================================================== 15 -->
+<section class="page">
+  <h2><span class="n">۱۵</span>چک‌لیست پیش از حساب واقعی</h2>
+
+  <p>پیش از اینکه اکسپرت را روی پول واقعی اجرا کنید، این موارد را یکی‌یکی تیک بزنید:</p>
+
+  <table>
+    <thead><tr><th style="width:8%" class="center">✓</th><th>مورد</th></tr></thead>
+    <tbody>
+      <tr><td class="center">☐</td><td>حداقل <strong>یک ماه کامل</strong> روی حساب دمو اجرا شده و نتیجه را دیده‌ام</td></tr>
+      <tr><td class="center">☐</td><td>حداقل <strong>۵۰ معامله</strong> ثبت شده تا آمار معنادار باشد</td></tr>
+      <tr><td class="center">☐</td><td>بک‌تست با مدل <strong>real ticks</strong> روی حداقل ۶ ماه دیتا گرفته‌ام</td></tr>
+      <tr><td class="center">☐</td><td>حساب دمو از <strong>همان بروکری</strong> است که حساب واقعی را دارم</td></tr>
+      <tr><td class="center">☐</td><td>می‌دانم بیشترین افت سرمایه (drawdown) در تست چقدر بوده و آن را تحمل می‌کنم</td></tr>
+      <tr><td class="center">☐</td><td><code>MaxDailyLossR</code> و <code>MaxTradesPerDay</code> را فعال کرده‌ام</td></tr>
+      <tr><td class="center">☐</td><td><code>RiskPercent</code> را روی حساب واقعی <strong>کمتر</strong> از دمو گذاشته‌ام</td></tr>
+      <tr><td class="center">☐</td><td>می‌دانم اگر برق یا اینترنت قطع شود چه اتفاقی برای پوزیشن‌های باز می‌افتد</td></tr>
+      <tr><td class="center">☐</td><td>می‌دانم چطور اکسپرت را <strong>فوری متوقف</strong> کنم (دکمه Algo Trading)</td></tr>
+      <tr><td class="center">☐</td><td>هر روز لاگ‌ها را مرور می‌کنم و اکسپرت را بی‌نظارت رها نمی‌کنم</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note ok">
+    <b>توصیه درباره VPS</b>
+    <p>اکسپرت فقط وقتی کار می‌کند که متاتریدر باز و متصل باشد. اگر کامپیوترتان خاموش
+    شود، پوزیشن‌های باز <strong>بدون مدیریت</strong> می‌مانند (هرچند حد ضرر و حد سود
+    روی سرور بروکر باقی می‌مانند و اجرا می‌شوند، ولی پارشال، ریسک‌فری و تریلینگ کار
+    نمی‌کنند). برای اجرای شبانه‌روزی از VPS استفاده کنید.</p>
+  </div>
+
+  <h3>اگر مشکلی دیدید</h3>
+  <p>هنگام گزارش مشکل این اطلاعات را همراه کنید: نماد و تایم‌فریم، تنظیمات کامل
+  پارامترها، متن دقیق پیام‌های تب Experts، و اسکرین‌شات چارت در لحظه رخداد.</p>
+
+  <div class="note danger" style="margin-top:6mm">
+    <b>سلب مسئولیت نهایی</b>
+    <p>این نرم‌افزار برای مقاصد آموزشی و پژوهشی ساخته شده و توصیه سرمایه‌گذاری نیست.
+    هیچ تضمینی برای سوددهی وجود ندارد و عملکرد گذشته پیش‌بینی‌کننده آینده نیست.
+    معامله در بازارهای اهرم‌دار می‌تواند به از دست رفتن <strong>کل سرمایه</strong>
+    منجر شود. تنها با پولی معامله کنید که توان از دست دادنش را دارید. مسئولیت کامل
+    هر تصمیم و هر معامله بر عهده خود شماست.</p>
+  </div>
+
+  <span class="page-num">۱۷</span><span class="page-tag">راهنمای اکسپرت SP2L — متاتریدر ۵</span>
+</section>
+
+</body>
+</html>

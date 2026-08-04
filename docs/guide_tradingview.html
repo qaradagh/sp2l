@@ -1,0 +1,871 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>راهنمای اندیکاتورهای SP2L و Pro BTB — تریدینگ‌ویو</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ============================================================ COVER -->
+<section class="page cover">
+  <div class="eyebrow">راهنمای کاربری — نسخه ۱.۰</div>
+  <h1>اندیکاتورهای SP2L و Pro BTB<br>برای تریدینگ‌ویو</h1>
+  <div class="rule"></div>
+  <div class="sub">
+    پیاده‌سازی استراتژی‌های پرایس‌اکشن محمدعلی پورصمدی<br>
+    اسپایک ← پولبک ← ادامه، با شبیه‌سازی کامل معامله روی چارت
+  </div>
+  <div class="chips">
+    <span class="chip">Pine Script v5</span>
+    <span class="chip">چهار آپشن ورود</span>
+    <span class="chip">پارشال و ریسک‌فری</span>
+    <span class="chip">داشبورد روزانه</span>
+    <span class="chip">سازگار با Bar Replay</span>
+  </div>
+  <div class="meta">
+    مخزن پروژه: <span dir="ltr">qaradagh/sp2l</span><br>
+    فایل‌ها: <span dir="ltr">pine/sp2l_indicator.pine</span> ، <span dir="ltr">pine/btb_indicator.pine</span><br>
+    این سند آموزشی/پژوهشی است و توصیه سرمایه‌گذاری نیست.
+  </div>
+</section>
+
+<!-- ============================================================== TOC -->
+<section class="page">
+  <h2>فهرست مطالب</h2>
+  <ul class="toc">
+    <li><span class="num">۱</span><span class="t">استراتژی در یک نگاه</span><span class="pg">۳</span></li>
+    <li><span class="num">۲</span><span class="t">نصب روی تریدینگ‌ویو</span><span class="pg">۴</span></li>
+    <li><span class="num">۳</span><span class="t">آناتومی ستاپ: اسپایک، پولبک، سطح</span><span class="pg">۵</span></li>
+    <li><span class="num">۴</span><span class="t">چهار آپشن ورود (مهم‌ترین بخش)</span><span class="pg">۶</span></li>
+    <li><span class="num">۵</span><span class="t">آنچه روی چارت می‌بینید</span><span class="pg">۸</span></li>
+    <li><span class="num">۶</span><span class="t">تنظیمات: تشخیص اسپایک</span><span class="pg">۹</span></li>
+    <li><span class="num">۷</span><span class="t">تنظیمات: چرخه ستاپ و مدیریت معامله</span><span class="pg">۱۰</span></li>
+    <li><span class="num">۸</span><span class="t">تنظیمات: فیلترها و گاردهای ریسک</span><span class="pg">۱۱</span></li>
+    <li><span class="num">۹</span><span class="t">شخصی‌سازی نمایش و محدوده ریسک/ریوارد</span><span class="pg">۱۲</span></li>
+    <li><span class="num">۱۰</span><span class="t">داشبورد و جدول وضعیت</span><span class="pg">۱۳</span></li>
+    <li><span class="num">۱۱</span><span class="t">آلارم‌ها</span><span class="pg">۱۴</span></li>
+    <li><span class="num">۱۲</span><span class="t">اندیکاتور Pro BTB</span><span class="pg">۱۵</span></li>
+    <li><span class="num">۱۳</span><span class="t">گردش‌کار پیشنهادی و Bar Replay</span><span class="pg">۱۶</span></li>
+    <li><span class="num">۱۴</span><span class="t">عیب‌یابی و پرسش‌های رایج</span><span class="pg">۱۷</span></li>
+  </ul>
+
+  <div class="note warn" style="margin-top:8mm">
+    <b>پیش از شروع بخوانید</b>
+    <p>این اندیکاتورها ابزار <strong>تحلیل و بک‌تست بصری</strong> هستند، نه سیستم سیگنال‌دهی
+    تضمین‌شده. معاملاتی که روی چارت شبیه‌سازی می‌شوند با فرض‌های محافظه‌کارانه محاسبه
+    می‌شوند و نتیجه واقعی شما به اسپرد، لغزش (slippage)، کمیسیون و کیفیت اجرای بروکر
+    بستگی دارد. هیچ عددی را بدون بک‌تست روی دیتای خودتان نپذیرید.</p>
+  </div>
+  <span class="page-num">۲</span><span class="page-tag">راهنمای اندیکاتور SP2L</span>
+</section>
+
+<!-- =========================================================== 1 -->
+<section class="page">
+  <h2><span class="n">۱</span>استراتژی در یک نگاه</h2>
+
+  <p>SP2L مخفف سه جزء است: <strong>Spike</strong> (حرکت شارپ)، <strong>2-Leg</strong>
+  (دو لگ حرکتی) و <strong>Level</strong> (سطح ورود). منطق استراتژی در یک جمله:</p>
+
+  <div class="note ok">
+    <b>قدرت ← اصلاح ← ادامه</b>
+    <p>قدرت اولیه بازار (اسپایک) را ببین، صبر کن بازار نفس بگیرد (پولبک)، و در شروع
+    لگ دوم روی یک سطح از پیش‌تعریف‌شده وارد شو.</p>
+  </div>
+
+  <p>وقتی بازار با جریان سنگین سفارش حرکت شارپ می‌کند، عدم‌تعادل بین خریدار و فروشنده
+  ایجاد می‌شود و روی چارت <strong>ناکارآمدی</strong> و معمولاً یک <strong>گپ قیمتی
+  (FVG)</strong> باقی می‌ماند. اگر جریان اصلی واقعاً قوی باشد، بعد از اصلاحی کوتاه،
+  حرکت دوم در همان جهت شکل می‌گیرد — و SP2L برای شکار همین لگ دوم طراحی شده است.</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 640 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="نمودار شماتیک ستاپ SP2L">
+      <defs>
+        <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 z" fill="#0f6ab4"/>
+        </marker>
+      </defs>
+      <rect x="0" y="0" width="640" height="260" fill="#f7fafd"/>
+      <!-- spike zone -->
+      <rect x="60" y="70" width="150" height="150" fill="#0f8f7a" opacity="0.10"/>
+      <rect x="60" y="70" width="150" height="150" fill="none" stroke="#0f8f7a" stroke-opacity=".45"/>
+      <text x="135" y="88" font-size="12" fill="#0f8f7a" text-anchor="middle" font-family="Vazirmatn">SPIKE</text>
+      <!-- candles: spike -->
+      <g stroke="#0f8f7a" fill="#0f8f7a">
+        <line x1="85" y1="200" x2="85" y2="215"/><rect x="79" y="185" width="12" height="18"/>
+        <line x1="120" y1="165" x2="120" y2="180"/><rect x="114" y="150" width="12" height="18"/>
+        <line x1="155" y1="130" x2="155" y2="145"/><rect x="149" y="115" width="12" height="18"/>
+        <line x1="190" y1="95" x2="190" y2="110"/><rect x="184" y="80" width="12" height="18"/>
+      </g>
+      <!-- pullback candles -->
+      <g stroke="#b3392f" fill="#b3392f">
+        <line x1="230" y1="98" x2="230" y2="128"/><rect x="224" y="102" width="12" height="22"/>
+        <line x1="265" y1="112" x2="265" y2="142"/><rect x="259" y="116" width="12" height="22"/>
+      </g>
+      <!-- second leg -->
+      <g stroke="#0f8f7a" fill="#0f8f7a">
+        <line x1="335" y1="72" x2="335" y2="102"/><rect x="329" y="76" width="12" height="22"/>
+        <line x1="370" y1="45" x2="370" y2="72"/><rect x="364" y="48" width="12" height="22"/>
+        <line x1="405" y1="28" x2="405" y2="52"/><rect x="399" y="32" width="12" height="20"/>
+      </g>
+      <!-- entry candle -->
+      <g stroke="#0f6ab4" fill="#0f6ab4">
+        <line x1="300" y1="82" x2="300" y2="120"/><rect x="294" y="86" width="12" height="26"/>
+      </g>
+      <!-- level B -->
+      <line x1="60" y1="80" x2="600" y2="80" stroke="#e8871a" stroke-width="2"/>
+      <text x="608" y="76" font-size="11" fill="#e8871a" font-family="Vazirmatn">B</text>
+      <!-- level A -->
+      <line x1="60" y1="215" x2="600" y2="215" stroke="#b3392f" stroke-width="1.6" stroke-dasharray="6 4"/>
+      <text x="608" y="219" font-size="11" fill="#b3392f" font-family="Vazirmatn">A</text>
+      <!-- target -->
+      <line x1="300" y1="18" x2="600" y2="18" stroke="#0f8f7a" stroke-width="2"/>
+      <text x="608" y="22" font-size="11" fill="#0f8f7a" font-family="Vazirmatn">TP</text>
+      <!-- annotations -->
+      <text x="245" y="175" font-size="11" fill="#5b6b80" text-anchor="middle" font-family="Vazirmatn">پولبک</text>
+      <path d="M248,165 L252,140" stroke="#5b6b80" fill="none" marker-end="url(#ar)"/>
+      <text x="370" y="130" font-size="11" fill="#5b6b80" text-anchor="middle" font-family="Vazirmatn">لگ دوم</text>
+      <text x="300" y="140" font-size="10.5" fill="#0f6ab4" text-anchor="middle" font-family="Vazirmatn">ورود</text>
+    </svg>
+    <div class="cap">شماتیک ستاپ خرید: اسپایک تا سطح B، اصلاح، و ورود در ادامه حرکت. حد ضرر پشت نقطه A.</div>
+  </div>
+
+  <h3>نقشه راه سه سطحی</h3>
+  <div class="grid">
+    <div class="card"><h4>نقطه A</h4><p>ابتدای اسپایک — کفِ کندل مبدأ در خرید (سقف در فروش). <strong>لنگرِ حد ضرر</strong>.</p></div>
+    <div class="card"><h4>نقطه B</h4><p>انتهای اسپایک — سقف آخرین کندل اسپایک در خرید (کف در فروش). <strong>سطح ورود</strong>.</p></div>
+  </div>
+  <span class="page-num">۳</span><span class="page-tag">راهنمای اندیکاتور SP2L</span>
+</section>
+
+<!-- =========================================================== 2 -->
+<section class="page">
+  <h2><span class="n">۲</span>نصب روی تریدینگ‌ویو</h2>
+
+  <ol class="steps">
+    <li>وارد حساب تریدینگ‌ویو شوید و چارت نماد موردنظر (مثلاً <span dir="ltr">XAUUSD</span>) را باز کنید.</li>
+    <li>در نوار پایین صفحه روی <strong>Pine Editor</strong> کلیک کنید تا ویرایشگر باز شود.</li>
+    <li>محتوای کامل فایل <code>pine/sp2l_indicator.pine</code> را کپی کنید و در ویرایشگر جای‌گذاری کنید (کد قبلی را کامل پاک کنید).</li>
+    <li>روی <strong>Save</strong> بزنید و یک نام دلخواه بگذارید (مثلاً <span dir="ltr">SP2L Poursamadi</span>).</li>
+    <li>روی <strong>Add to chart</strong> بزنید. اندیکاتور روی چارت ظاهر می‌شود.</li>
+    <li>برای تنظیمات، روی نام اندیکاتور در گوشه بالای چارت رفته و آیکن چرخ‌دنده (<strong>Settings</strong>) را بزنید.</li>
+  </ol>
+
+  <div class="note">
+    <b>تایم‌فریم و نماد پیشنهادی</b>
+    <p>استراتژی برای اسکالپ روی تایم‌فریم‌های پایین (<strong>M1 و M5</strong>) و بازارهای
+    پرنوسان مثل <strong>طلا (XAUUSD)</strong>، شاخص‌ها و جفت‌ارزهای اصلی طراحی شده است.
+    روی تایم‌های بالاتر هم اجرا می‌شود ولی تعداد ستاپ‌ها به‌شدت کم می‌شود.</p>
+  </div>
+
+  <h3>نصب هم‌زمان هر دو اندیکاتور</h3>
+  <p>اگر می‌خواهید هم ستاپ‌های SP2L و هم Pro BTB را ببینید، همین مراحل را برای فایل
+  <code>pine/btb_indicator.pine</code> هم تکرار کنید. هر دو روی یک چارت قابل اجرا هستند.</p>
+
+  <div class="note warn">
+    <b>توجه به سقف آبجکت‌ها</b>
+    <p>Pine اجازه رسم حداکثر ۵۰۰ خط، ۵۰۰ باکس و ۵۰۰ لیبل را می‌دهد. اگر روی چارت‌های
+    خیلی طولانی رسم‌ها ناقص شدند، از گروه <strong>History</strong> استفاده کنید (بخش ۹)
+    تا فقط چند روز اخیر رسم شود.</p>
+  </div>
+
+  <h3>به‌روزرسانی به نسخه جدید</h3>
+  <p>برای به‌روزرسانی، کافی است کد جدید را در همان اسکریپت ذخیره‌شده جای‌گذاری کنید و
+  دوباره Save بزنید — تنظیمات شما تا حد امکان حفظ می‌شود. اگر ورودی جدیدی اضافه شده
+  باشد با مقدار پیش‌فرض ظاهر می‌شود.</p>
+
+  <span class="page-num">۴</span><span class="page-tag">راهنمای اندیکاتور SP2L</span>
+</section>
+
+<!-- =========================================================== 3 -->
+<section class="page">
+  <h2><span class="n">۳</span>آناتومی ستاپ: اسپایک، پولبک، سطح</h2>
+
+  <h3>۳.۱ اسپایک معتبر</h3>
+  <p>اندیکاتور یک حرکت را وقتی «اسپایک» می‌شناسد که <strong>همهٔ</strong> شرط‌های زیر برقرار باشد:</p>
+  <table>
+    <thead><tr><th style="width:32%">شرط</th><th>توضیح</th><th style="width:20%">پارامتر</th></tr></thead>
+    <tbody>
+      <tr><td>کندل‌های متوالی</td><td>حداقل N کندل پشت‌سرهم هم‌جهت</td><td><code>Minimum spike bars</code></td></tr>
+      <tr><td>بدنه قوی</td><td>نسبت بدنه به کل رنج هر کندل از حد مشخصی بیشتر باشد</td><td><code>Min body/range ratio</code></td></tr>
+      <tr><td>تحمل دوجی</td><td>چند کندل کم‌بدنه داخل اسپایک قابل چشم‌پوشی است</td><td><code>Doji tolerance</code></td></tr>
+      <tr><td>گپ قیمتی</td><td>حداقل یک FVG سه‌کندلی داخل اسپایک وجود داشته باشد</td><td><code>Require P-Gap</code></td></tr>
+      <tr><td>قدرت حرکت</td><td>طول کل اسپایک از ضریبی از ATR بزرگ‌تر باشد</td><td><code>Movement power</code></td></tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <b>گپ قیمتی (FVG) چیست؟</b>
+    <p>وقتی سه کندل پشت‌سرهم چنان سریع حرکت می‌کنند که کف کندل سوم بالاتر از سقف کندل
+    اول بماند (در حرکت صعودی)، یک «حفره» قیمتی باقی می‌ماند که نشانه ورود نقدینگی
+    جدی است. اندیکاتور این نواحی را با باکس رنگی نشان می‌دهد.</p>
+  </div>
+
+  <h3>۳.۲ گسترش اسپایک</h3>
+  <p>اگر بلافاصله بعد از اسپایک یک کندل قوی دیگر در همان جهت بیاید، اسپایک
+  <strong>گسترش می‌یابد</strong> و سطح B جلو می‌رود. این یعنی اندیکاتور زودتر از موعد
+  وارد نمی‌شود و منتظر می‌ماند تا حرکت واقعاً تمام شود.</p>
+
+  <h3>۳.۳ پولبک (اصلاح)</h3>
+  <p>پولبک وقتی شروع می‌شود که کندلی خلاف جهت اسپایک بسته شود یا اکسترمم کندل قبلی را
+  در جهت مخالف بشکند. از این لحظه اندیکاتور منتظر شکست سطح B می‌ماند.</p>
+
+  <h3>۳.۴ ابطال و انقضا</h3>
+  <div class="grid">
+    <div class="card">
+      <h4>✖ ابطال (Cancelled)</h4>
+      <p>اگر اصلاح آن‌قدر عمیق شود که کل اسپایک را پس بگیرد (بیش از
+      <code>Max pullback retrace</code>)، فرض «قدرت جریان اصلی» نقض شده و ستاپ باطل می‌شود.</p>
+    </div>
+    <div class="card">
+      <h4>✖ انقضا (Expired)</h4>
+      <p>اگر تا <code>Max bars to wait</code> کندل بعد از اسپایک شکستی رخ ندهد، ستاپ
+      منقضی می‌شود؛ حرکت دیگر «تازه» نیست.</p>
+    </div>
+  </div>
+
+  <p>هر دو حالت روی چارت با لیبل خاکستری علامت‌گذاری می‌شوند، پس همیشه می‌دانید چرا
+  یک ستاپ به معامله تبدیل نشد.</p>
+
+  <span class="page-num">۵</span><span class="page-tag">راهنمای اندیکاتور SP2L</span>
+</section>
+
+<!-- =========================================================== 4 -->
+<section class="page">
+  <h2><span class="n">۴</span>چهار آپشن ورود</h2>
+
+  <p>این مهم‌ترین بخش تنظیمات است. دو ورودی مستقل، چهار حالت ورود می‌سازند:</p>
+
+  <table>
+    <thead>
+      <tr><th style="width:10%" class="center">آپشن</th><th style="width:26%">تأیید شکست</th><th style="width:26%">نوع سفارش</th><th>رفتار</th></tr>
+    </thead>
+    <tbody>
+      <tr><td class="center"><strong>۱</strong></td><td>Shadow or close</td><td>Market</td><td>شکست با سایه یا کلوز → ورود مارکت روی <strong>اوپن کندل بعدی</strong></td></tr>
+      <tr><td class="center"><strong>۲</strong></td><td>Shadow or close</td><td>Limit</td><td>شکست با سایه یا کلوز → کاشتن <strong>لیمیت روی خط B</strong></td></tr>
+      <tr><td class="center"><strong>۳</strong></td><td>Close only</td><td>Market</td><td>شکست فقط با <strong>کلوز</strong> → ورود مارکت روی اوپن کندل بعدی</td></tr>
+      <tr><td class="center"><strong>۴</strong></td><td>Close only</td><td>Limit</td><td>شکست فقط با <strong>کلوز</strong> → کاشتن لیمیت روی خط B</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note ok">
+    <b>قانون طلایی: هیچ ورودی روی خودِ کندل شکست انجام نمی‌شود</b>
+    <p>در هر چهار حالت، اندیکاتور اول اجازه می‌دهد کندلِ شکست <strong>بسته شود</strong>،
+    بعد تصمیم می‌گیرد. این دقیقاً همان کاری است که یک معامله‌گر واقعی می‌کند و باعث
+    می‌شود نتایج روی چارت با اجرای واقعی هم‌خوان باشد.</p>
+  </div>
+
+  <h3>تأیید شکست: کلوز یا سایه؟</h3>
+  <div class="grid">
+    <div class="card">
+      <h4>Close only (سخت‌گیرانه)</h4>
+      <p>کندل باید <strong>فراتر از سطح B بسته شود</strong>. فیک‌اوت‌هایی که فقط با سایه
+      سطح را لمس می‌کنند رد می‌شوند.</p>
+      <p><strong>نتیجه:</strong> سیگنال کمتر، کیفیت بالاتر، ورود کمی دیرتر.</p>
+    </div>
+    <div class="card">
+      <h4>Shadow or close (سریع)</h4>
+      <p>هر عبور قیمت از B — حتی با سایه — شکست حساب می‌شود.</p>
+      <p><strong>نتیجه:</strong> سیگنال بیشتر و زودتر، ولی فیک‌اوت بیشتر.</p>
+    </div>
+  </div>
+
+  <h3>نوع سفارش: مارکت یا لیمیت؟</h3>
+  <div class="grid">
+    <div class="card">
+      <h4>Market (اوپن کندل بعدی)</h4>
+      <p>به‌محض تأیید شکست، معامله روی اوپن کندل بعد باز می‌شود.</p>
+      <p><strong>مزیت:</strong> همیشه فعال می‌شود — هیچ حرکتی را از دست نمی‌دهید.<br>
+      <strong>عیب:</strong> قیمت ورود بدتر و حد ضرر دورتر است.</p>
+    </div>
+    <div class="card">
+      <h4>Limit (روی خط B)</h4>
+      <p>سفارش لیمیت دقیقاً روی سطح B کاشته می‌شود و منتظر برگشت قیمت می‌ماند.</p>
+      <p><strong>مزیت:</strong> ورود بهتر، حد ضرر نزدیک‌تر، R بزرگ‌تر.<br>
+      <strong>عیب:</strong> ممکن است <strong>هیچ‌وقت فعال نشود</strong>.</p>
+    </div>
+  </div>
+
+  <span class="page-num">۶</span><span class="page-tag">راهنمای اندیکاتور SP2L</span>
+</section>
+
+<section class="page">
+  <h3>سفارش لیمیت فعال نشده</h3>
+  <p>وقتی حالت لیمیت را انتخاب می‌کنید، ممکن است قیمت بعد از شکست بدون برگشت به راه
+  خود ادامه دهد. در این حالت:</p>
+  <ul>
+    <li>سفارش تا <code>Limit: bars to wait for a fill</code> کندل منتظر می‌ماند؛</li>
+    <li>اگر پر نشد، <strong>لغو می‌شود</strong> و با لیبل <strong>◌ Not activated</strong> روی چارت علامت می‌خورد؛</li>
+    <li>هیچ معامله‌ای ثبت نمی‌شود و در آمار داشبورد هم شمرده نمی‌شود.</li>
+  </ul>
+
+  <div class="note">
+    <b>در ورود مارکت این موضوع بی‌معناست</b>
+    <p>چون سفارش مارکت همیشه روی اوپن کندل بعدی پر می‌شود، مفهوم «فعال نشدن» فقط
+    برای حالت لیمیت وجود دارد.</p>
+  </div>
+
+  <h3>کدام آپشن را انتخاب کنم؟</h3>
+  <table>
+    <thead><tr><th style="width:30%">اگر…</th><th>پیشنهاد</th></tr></thead>
+    <tbody>
+      <tr><td>تازه شروع کرده‌اید</td><td><strong>آپشن ۳</strong> (کلوز + مارکت) — نزدیک‌ترین حالت به روش کلاسیک و ساده‌ترین برای رصد</td></tr>
+      <tr><td>بازار خیلی پرشتاب است و پولبک عمیق نمی‌دهد</td><td><strong>آپشن ۱ یا ۳</strong> (مارکت) — لیمیت اغلب پر نمی‌شود</td></tr>
+      <tr><td>می‌خواهید ریسک‌به‌ریوارد بالاتری بگیرید</td><td><strong>آپشن ۴</strong> (کلوز + لیمیت) — ورود بهتر، ولی تعداد معامله کمتر</td></tr>
+      <tr><td>فیک‌اوت زیاد می‌خورید</td><td><strong>Close only</strong> را روشن کنید (آپشن ۳ یا ۴)</td></tr>
+    </tbody>
+  </table>
+
+  <h3>گروه Entries &amp; concurrency</h3>
+  <table>
+    <thead><tr><th style="width:34%">تنظیم</th><th style="width:16%">پیش‌فرض</th><th>توضیح</th></tr></thead>
+    <tbody>
+      <tr><td><code>Break of B counts on</code></td><td>Close only</td><td>تأیید شکست: فقط کلوز یا سایه هم قبول است</td></tr>
+      <tr><td><code>Entry order</code></td><td>Market</td><td>نوع سفارش: مارکت روی اوپن بعدی یا لیمیت روی B</td></tr>
+      <tr><td><code>Limit: bars to wait for a fill</code></td><td>۱۰</td><td>مهلت پر شدن لیمیت پیش از لغو</td></tr>
+      <tr><td><code>Take all trades</code></td><td>خاموش</td><td>گرفتن همه سیگنال‌ها حتی وقتی معامله‌ای باز است</td></tr>
+    </tbody>
+  </table>
+
+  <h3>گزینه «همه تریدها را بگیر»</h3>
+  <p>پیش‌فرض: وقتی معامله‌ای باز است، سیگنال جدید با لیبل
+  <strong>◌ Skipped (in trade)</strong> رد می‌شود. با روشن کردن
+  <code>Take all trades</code> هر سیگنال واجد شرایط گرفته می‌شود، چند معامله هم‌زمان
+  روی چارت مدیریت می‌شوند و جدول وضعیت تعداد آن‌ها و R زنده مجموع را نشان می‌دهد.</p>
+
+  <div class="note warn">
+    <b>هشدار مدیریت ریسک</b>
+    <p>با روشن کردن این گزینه، ریسک کل شما چند برابر می‌شود. اگر هر معامله ۱٪ ریسک
+    داشته باشد و سه معامله هم‌زمان باز باشد، عملاً ۳٪ روی خط است. حتماً گاردهای
+    روزانه (بخش ۸) را فعال کنید.</p>
+  </div>
+
+  <span class="page-num">۷</span><span class="page-tag">راهنمای اندیکاتور SP2L</span>
+</section>
+
+<!-- =========================================================== 5 -->
+<section class="page">
+  <h2><span class="n">۵</span>آنچه روی چارت می‌بینید</h2>
+
+  <h3>عناصر ستاپ (پیش از ورود)</h3>
+  <div class="legend">
+    <span><i class="dot" style="background:#0f8f7a;opacity:.35"></i> باکس SPIKE — محدوده کندل‌های اسپایک</span>
+    <span><i class="dot" style="background:#0f8f7a;opacity:.55"></i> باکس FVG — گپ قیمتی داخل اسپایک</span>
+    <span><i class="sw" style="background:#e8871a"></i> خط نارنجی — سطح ورود (B)</span>
+    <span><i class="sw" style="background:#b3392f"></i> خط قرمز نقطه‌چین — لنگر حد ضرر (A)</span>
+  </div>
+
+  <h3>عناصر معامله (پس از ورود)</h3>
+  <div class="legend">
+    <span><i class="sw" style="background:#e8871a"></i> خط ورود</span>
+    <span><i class="sw" style="background:#b3392f"></i> خط حد ضرر</span>
+    <span><i class="sw" style="background:#0f8f7a"></i> خط حد سود</span>
+    <span><i class="sw" style="background:#0f6ab4"></i> استاپِ جابه‌جاشده (ریسک‌فری یا تریل)</span>
+    <span><i class="dot" style="background:#b3392f;opacity:.25"></i> محدوده ریسک</span>
+    <span><i class="dot" style="background:#0f8f7a;opacity:.25"></i> محدوده ریوارد</span>
+  </div>
+
+  <div class="note ok">
+    <b>خط استاپ آبی شد یعنی چه؟</b>
+    <p>یعنی حد ضرر از جای اولیه‌اش جابه‌جا شده — یا با ریسک‌فری به نقطه ورود رفته یا
+    تریلینگ آن را جلو کشیده. دقیقاً می‌بینید در کدام کندل این اتفاق افتاده است.</p>
+  </div>
+
+  <h3>لیبل سرنوشت ستاپ‌ها</h3>
+  <p>هر ستاپی که به معامله تبدیل نشد، دلیلش روی چارت نوشته می‌شود:</p>
+  <table>
+    <thead><tr><th style="width:34%">لیبل</th><th>معنی</th></tr></thead>
+    <tbody>
+      <tr><td><strong>✖ Cancelled</strong></td><td>قیمت برگشت و ستاپ باطل شد (اصلاح از حد مجاز عمیق‌تر شد)</td></tr>
+      <tr><td><strong>✖ Expired</strong></td><td>مهلت انتظار تمام شد و شکستی رخ نداد</td></tr>
+      <tr><td><strong>◌ Not activated</strong></td><td>سفارش لیمیت پر نشد و لغو شد (فقط در حالت لیمیت)</td></tr>
+      <tr><td><strong>◌ Skipped (in trade)</strong></td><td>سیگنال آمد ولی معامله دیگری باز بود</td></tr>
+      <tr><td><strong>◌ Off-session</strong></td><td>سیگنال خارج از سشن تعریف‌شده رخ داد</td></tr>
+      <tr><td><strong>◌ Daily limit</strong></td><td>گارد ریسک روزانه فعال شده بود</td></tr>
+    </tbody>
+  </table>
+
+  <h3>لیبل نتیجه معاملات</h3>
+  <table>
+    <thead><tr><th style="width:24%">لیبل</th><th>معنی</th></tr></thead>
+    <tbody>
+      <tr><td><strong>TP +1.00R</strong></td><td>معامله با حد سود بسته شد</td></tr>
+      <tr><td><strong>SL −1.00R</strong></td><td>معامله با حد ضرر بسته شد</td></tr>
+      <tr><td><strong>BE +0.00R</strong></td><td>در نقطه ریسک‌فری بسته شد (سربه‌سر یا با سود قفل‌شده)</td></tr>
+      <tr><td><strong>TRL +2.30R</strong></td><td>با استاپ تریل‌شده در سود بسته شد</td></tr>
+    </tbody>
+  </table>
+
+  <span class="page-num">۸</span><span class="page-tag">راهنمای اندیکاتور SP2L</span>
+</section>
+
+<!-- =========================================================== 6 -->
+<section class="page">
+  <h2><span class="n">۶</span>تنظیمات: تشخیص اسپایک</h2>
+  <p>گروه <strong>Spike detection</strong> تعیین می‌کند چه حرکتی «اسپایک» شمرده شود.
+  سخت‌گیرانه‌ترش کنید تا سیگنال کمتر ولی تمیزتر بگیرید.</p>
+
+  <table>
+    <thead><tr><th style="width:34%">پارامتر</th><th style="width:14%" class="center">پیش‌فرض</th><th>توضیح و اثر تغییر</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>Minimum spike bars</code></td><td class="center">۳</td>
+        <td>حداقل تعداد کندل متوالی اسپایک. افزایش آن فقط حرکت‌های طولانی‌تر را قبول می‌کند (سیگنال کمتر).</td>
+      </tr>
+      <tr>
+        <td><code>Min body/range ratio</code></td><td class="center">۰٫۵</td>
+        <td>حداقل نسبت بدنه به کل رنج کندل. مقدار بالاتر یعنی فقط کندل‌های پرقدرت با سایه کوتاه قبول می‌شوند.</td>
+      </tr>
+      <tr>
+        <td><code>Doji tolerance</code></td><td class="center">۱</td>
+        <td>چند کندل کم‌بدنه داخل اسپایک قابل چشم‌پوشی است. صفر یعنی هیچ وقفه‌ای مجاز نیست.</td>
+      </tr>
+      <tr>
+        <td><code>Max doji body ratio</code></td><td class="center">۰٫۲۵</td>
+        <td>آستانه‌ای که پایین‌تر از آن یک کندل «دوجی» شمرده می‌شود.</td>
+      </tr>
+      <tr>
+        <td><code>Require P-Gap (FVG)</code></td><td class="center">روشن</td>
+        <td>الزام وجود گپ قیمتی داخل اسپایک. خاموش کردنش سیگنال‌ها را زیاد ولی کیفیتشان را کم می‌کند.</td>
+      </tr>
+      <tr>
+        <td><code>Movement power (x ATR)</code></td><td class="center">۱٫۵</td>
+        <td>طول اسپایک باید از این ضریب × ATR بزرگ‌تر باشد. مقدار ۰ فیلتر را خاموش می‌کند.</td>
+      </tr>
+      <tr>
+        <td><code>ATR length</code></td><td class="center">۱۴</td>
+        <td>دوره ATR مورد استفاده در فیلتر قدرت و تریلینگ استاپ.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <b>نکته تنظیم</b>
+    <p>اگر روی نماد شما ستاپ خیلی کم پیدا می‌شود، اول <code>Movement power</code> را کم
+    کنید (مثلاً ۱٫۰) و بعد <code>Require P-Gap</code> را خاموش کنید. اگر برعکس سیگنال
+    زیاد و بی‌کیفیت است، <code>Min body/range ratio</code> را به ۰٫۶ ببرید.</p>
+  </div>
+
+  <h3>اثر تنظیمات بر تعداد سیگنال</h3>
+  <div class="grid">
+    <div class="card"><h4>سخت‌گیرانه</h4><p>کندل بیشتر، بدنه بزرگ‌تر، گپ الزامی، قدرت بالا → <strong>ستاپ‌های کم ولی تمیز</strong></p></div>
+    <div class="card"><h4>آزادانه</h4><p>حداقل‌ها پایین، گپ اختیاری، قدرت خاموش → <strong>ستاپ زیاد ولی پرنویز</strong></p></div>
+  </div>
+
+  <span class="page-num">۹</span><span class="page-tag">راهنمای اندیکاتور SP2L</span>
+</section>
+
+<!-- =========================================================== 7 -->
+<section class="page">
+  <h2><span class="n">۷</span>چرخه ستاپ و مدیریت معامله</h2>
+
+  <h3>گروه Setup lifecycle</h3>
+  <table>
+    <thead><tr><th style="width:34%">پارامتر</th><th style="width:14%" class="center">پیش‌فرض</th><th>توضیح</th></tr></thead>
+    <tbody>
+      <tr><td><code>Max pullback retrace</code></td><td class="center">۱٫۰</td><td>حداکثر عمق اصلاح نسبت به طول اسپایک؛ بیشتر از آن ستاپ باطل می‌شود</td></tr>
+      <tr><td><code>Max bars to wait after spike</code></td><td class="center">۲۰</td><td>مهلت رخ دادن شکست؛ بعد از آن ستاپ منقضی می‌شود</td></tr>
+      <tr><td><code>Final target (R:R)</code></td><td class="center">۱٫۰</td><td>حد سود بر حسب برابر ریسک</td></tr>
+      <tr><td><code>SL buffer</code></td><td class="center">۰٫۰</td><td>فاصله اضافی حد ضرر از نقطه A (کسری از طول اسپایک)</td></tr>
+      <tr><td><code>Session filter</code></td><td class="center">خاموش</td><td>محدود کردن ورود به ساعات مشخص</td></tr>
+      <tr><td><code>Session</code></td><td class="center">13:30–20:00</td><td>ساعت سشن به وقت صرافی چارت (نه وقت محلی شما)</td></tr>
+    </tbody>
+  </table>
+
+  <h3>گروه Trade management</h3>
+  <table>
+    <thead><tr><th style="width:34%">پارامتر</th><th style="width:14%" class="center">پیش‌فرض</th><th>توضیح</th></tr></thead>
+    <tbody>
+      <tr><td><code>Partial take-profit</code></td><td class="center">خاموش</td><td>بستن بخشی از پوزیشن در سطح مشخص</td></tr>
+      <tr><td><code>Partial level (R)</code></td><td class="center">۱٫۰</td><td>در چند برابر ریسک، پارشال گرفته شود</td></tr>
+      <tr><td><code>Partial size (%)</code></td><td class="center">۵۰</td><td>چند درصد پوزیشن در پارشال بسته شود</td></tr>
+      <tr><td><code>Breakeven</code></td><td class="center">Off</td><td><code>At RR trigger</code> یا <code>After partial</code></td></tr>
+      <tr><td><code>BE trigger (R)</code></td><td class="center">۱٫۰</td><td>در چند R استاپ به نقطه ورود منتقل شود</td></tr>
+      <tr><td><code>BE offset (R locked)</code></td><td class="center">۰٫۰</td><td>چند R سود قفل شود (۰ = دقیقاً سربه‌سر)</td></tr>
+    </tbody>
+  </table>
+
+  <h3>ریسک‌فری چطور کار می‌کند؟</h3>
+  <div class="grid">
+    <div class="card">
+      <h4>At RR trigger</h4>
+      <p>به‌محض اینکه قیمت به سطح تعیین‌شده (مثلاً ۱R) برسد، حد ضرر به نقطه ورود منتقل
+      می‌شود. مستقل از پارشال کار می‌کند.</p>
+    </div>
+    <div class="card">
+      <h4>After partial</h4>
+      <p>حد ضرر فقط بعد از گرفته شدن پارشال به نقطه ورود می‌رود. منطقی‌تر است چون تا
+      آن لحظه بخشی از سود قفل شده.</p>
+    </div>
+  </div>
+
+  <div class="note warn">
+    <b>معاوضه واقعی پارشال و ریسک‌فری</b>
+    <p>این ابزارها ضررها را کوچک‌تر می‌کنند ولی بخشی از حرکت‌های بزرگ را هم از دست
+    می‌دهند. در تست‌های ما روی دیتای مصنوعی، فعال کردنشان میانگین نتیجه را
+    <strong>کاهش</strong> داد. این بدان معنا نیست که بد هستند — یعنی باید روی دیتای
+    واقعی <strong>خودتان</strong> اندازه‌گیری کنید که این معاوضه به نفعتان هست یا نه.</p>
+  </div>
+
+  <span class="page-num">۱۰</span><span class="page-tag">راهنمای اندیکاتور SP2L</span>
+</section>
+
+<!-- =========================================================== 8 -->
+<section class="page">
+  <h2><span class="n">۸</span>فیلترها و گاردهای ریسک</h2>
+
+  <table>
+    <thead><tr><th style="width:34%">پارامتر</th><th style="width:14%" class="center">پیش‌فرض</th><th>توضیح</th></tr></thead>
+    <tbody>
+      <tr><td><code>ATR trailing stop</code></td><td class="center">۰ (خاموش)</td><td>تعقیب قیمت با فاصله n×ATR؛ استاپ فقط سفت می‌شود و هرگز شل نمی‌شود</td></tr>
+      <tr><td><code>Cost per trade (R)</code></td><td class="center">۰٫۰</td><td>کسر هزینه اسپرد و کمیسیون از نتیجه هر معامله بر حسب R</td></tr>
+      <tr><td><code>Max trades per day</code></td><td class="center">۰ (خاموش)</td><td>سقف تعداد معامله در روز</td></tr>
+      <tr><td><code>Max daily loss (R)</code></td><td class="center">۰٫۰</td><td>توقف معامله بعد از این مقدار ضرر در روز</td></tr>
+    </tbody>
+  </table>
+
+  <h3>چرا هزینه معامله مهم است؟</h3>
+  <p>در اسکالپ روی M1/M5، فاصله حد ضرر کوچک است و اسپرد سهم بزرگی از آن را می‌خورد.
+  بک‌تستی که هزینه را حساب نکند <strong>گمراه‌کننده</strong> است. برای تخمین:</p>
+
+  <pre><span class="c"># مثال: طلا، اسپرد ۳۰ سنت، حد ضرر ۳ دلار</span>
+cost_r = 0.30 / 3.00 = 0.10   <span class="c"># یعنی ۰٫۱ از هر R</span></pre>
+
+  <p>یعنی هر معامله برنده به‌جای ۱R، حدود ۰٫۹R و هر بازنده ۱٫۱R می‌شود. با وین‌ریت
+  متوسط، این اختلاف می‌تواند یک سیستم سودده روی کاغذ را زیان‌ده کند.</p>
+
+  <h3>گاردهای روزانه — مهم‌ترین محافظ سرمایه</h3>
+  <div class="note danger">
+    <b>چرا باید فعالشان کنید</b>
+    <p>بدترین دشمن یک استراتژی خوب، «روز بد» است: چند ضرر پشت‌سرهم که به معامله
+    انتقامی منجر می‌شود. گارد ضرر روزانه دقیقاً همان چیزی است که پراپ‌فرم‌ها اجبار
+    می‌کنند. پیشنهاد شروع: <code>Max daily loss = 2R</code> و
+    <code>Max trades per day = 3</code>.</p>
+  </div>
+
+  <p>بعد از فعال شدن گارد، سیگنال‌های باقیمانده همان روز با لیبل
+  <strong>◌ Daily limit</strong> رد می‌شوند و روز بعد شمارنده صفر می‌شود.</p>
+
+  <h3>تریلینگ استاپ ATR</h3>
+  <p>وقتی روشن باشد، حد ضرر با فاصله ثابتی از قیمت دنبال می‌کند. برای روزهای رونددار
+  که حرکت خیلی بیشتر از تارگت ثابت می‌رود مفید است. خروجی‌های تریل‌شده با برچسب
+  <strong>TRL</strong> علامت می‌خورند.</p>
+
+  <div class="note">
+    <b>ترکیب پیشنهادی برای شروع</b>
+    <p>تارگت را روی ۲R بگذارید، پارشال ۵۰٪ در ۱R، ریسک‌فری بعد از پارشال، و
+    تریلینگ خاموش. بعد از ۱۰۰ معامله بک‌تست، تک‌تک این‌ها را جدا تست کنید.</p>
+  </div>
+
+  <span class="page-num">۱۱</span><span class="page-tag">راهنمای اندیکاتور SP2L</span>
+</section>
+
+<!-- =========================================================== 9 -->
+<section class="page">
+  <h2><span class="n">۹</span>شخصی‌سازی نمایش</h2>
+
+  <h3>گروه Trade lines</h3>
+  <table>
+    <thead><tr><th style="width:38%">تنظیم</th><th>توضیح</th></tr></thead>
+    <tbody>
+      <tr><td><code>Line style</code></td><td>نوع خط: Solid / Dashed / Dotted</td></tr>
+      <tr><td><code>Line width</code></td><td>ضخامت خط از ۱ تا ۵</td></tr>
+      <tr><td><code>Extend lines right (bars)</code></td><td>ادامه دادن خطوط به سمت راست چارت</td></tr>
+      <tr><td><code>Show E/SL/TP prices in the signal label</code></td><td>نمایش یا مخفی کردن عددهای قیمت داخل باکس Buy/Sell</td></tr>
+      <tr><td><code>Entry / Stop / Target</code></td><td>رنگ مجزای هر یک از سه خط</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note ok">
+    <b>وقتی چارت شلوغ می‌شود</b>
+    <p>گزینه <code>Show E/SL/TP prices in the signal label</code> را خاموش کنید. باکس
+    سیگنال فقط جهت معامله (LONG/SHORT) را نشان می‌دهد و قیمت‌ها حذف می‌شوند — چارت
+    بسیار تمیزتر می‌شود، مخصوصاً وقتی چند معامله هم‌زمان دارید.</p>
+  </div>
+
+  <h3>گروه Risk / reward zones</h3>
+  <p>دقیقاً مثل ابزار <strong>Long/Short Position</strong> خود تریدینگ‌ویو:
+  <strong>محدوده قرمز</strong> از ورود تا حد ضرر (ریسک)، <strong>محدوده سبز</strong> از
+  ورود تا حد سود (ریوارد)، و <strong>برچسب</strong> نسبت به‌صورت عددی
+  (<span dir="ltr">R:R 1:2.0</span>). رنگ هر دو محدوده و روشن/خاموش بودن برچسب قابل
+  تنظیم است.</p>
+
+  <h3>گروه Box transparency</h3>
+  <table>
+    <thead><tr><th style="width:38%">تنظیم</th><th>توضیح</th></tr></thead>
+    <tbody>
+      <tr><td><code>Spike fill / border</code></td><td>شفافیت جداگانه پس‌زمینه و کادر باکس اسپایک</td></tr>
+      <tr><td><code>FVG fill / border</code></td><td>شفافیت جداگانه پس‌زمینه و کادر باکس‌های گپ قیمتی</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <b>برای دیده شدن سایه کندل‌ها</b>
+    <p>عدد <code>border</code> را بالا ببرید (مثلاً ۸۰ تا ۹۰) تا کادر باکس‌ها کم‌رنگ شود
+    و سایه/ویک کندل‌ها پشت آن‌ها واضح دیده شوند. عدد بالاتر = شفاف‌تر.</p>
+  </div>
+
+  <h3>گروه History</h3>
+  <p>با روشن کردن <code>Limit chart drawings to recent days</code> فقط رسم‌های N روز اخیر
+  روی چارت نمایش داده می‌شوند. این کار دو فایده دارد:</p>
+  <ul>
+    <li>چارت تمیزتر و قابل‌خواندن‌تر می‌شود؛</li>
+    <li>از برخورد با سقف ۵۰۰ آبجکت Pine جلوگیری می‌کند.</li>
+  </ul>
+  <p>مهم: <strong>داشبورد و آمار همچنان کل تاریخچه را می‌شمارند</strong> — فقط رسم‌ها
+  محدود می‌شوند.</p>
+
+  <span class="page-num">۱۲</span><span class="page-tag">راهنمای اندیکاتور SP2L</span>
+</section>
+
+<!-- =========================================================== 10 -->
+<section class="page">
+  <h2><span class="n">۱۰</span>داشبورد و جدول وضعیت</h2>
+
+  <h3>جدول وضعیت (بالا-راست چارت)</h3>
+  <p>وضعیت لحظه‌ای سیستم را نشان می‌دهد:</p>
+  <table>
+    <thead><tr><th style="width:26%">ردیف</th><th>معنی</th></tr></thead>
+    <tbody>
+      <tr><td><strong>SP2L</strong></td><td>فاز فعلی: <code>IDLE</code> (بی‌کار) / <code>SPIKE</code> (اسپایک تأیید شده) / <code>PULLBACK</code> (در حال اصلاح)</td></tr>
+      <tr><td><strong>Dir</strong></td><td>جهت ستاپ فعلی: LONG یا SHORT</td></tr>
+      <tr><td><strong>Entry B</strong></td><td>قیمت سطح ورود فعلی</td></tr>
+      <tr><td><strong>Stop A</strong></td><td>قیمت لنگر حد ضرر</td></tr>
+      <tr><td><strong>Trade</strong></td><td><code>FLAT</code> یا تعداد معاملات باز به‌همراه <strong>R زنده</strong>؛ <code>+nL</code> یعنی n سفارش لیمیت در انتظار</td></tr>
+    </tbody>
+  </table>
+
+  <h3>داشبورد (پایین-راست چارت)</h3>
+  <p>عملکرد تاریخی را جمع‌بندی می‌کند:</p>
+
+  <div class="grid">
+    <div class="card">
+      <h4>بخش روزانه</h4>
+      <p>برای هر روز: <strong>تعداد معامله</strong>، <strong>تعداد برد</strong> و
+      <strong>مجموع R</strong> آن روز. سبز = روز سودده، قرمز = روز زیان‌ده.</p>
+    </div>
+    <div class="card">
+      <h4>ردیف Σ total</h4>
+      <p>جمع کل معاملات و مجموع R از ابتدای تاریخچه بارگذاری‌شده چارت.</p>
+    </div>
+    <div class="card">
+      <h4>لیست معاملات اخیر</h4>
+      <p>زمان، جهت (▲/▼) و نتیجه R هر معامله — به‌ترتیب از جدیدترین.</p>
+    </div>
+    <div class="card">
+      <h4>تنظیمات داشبورد</h4>
+      <p><code>Days shown</code> و <code>Recent trades shown</code> تعداد ردیف‌های هر بخش
+      را کنترل می‌کنند.</p>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>چرا R به‌جای دلار؟</b>
+    <p>واحد <strong>R</strong> یعنی «برابر ریسک اولیه». اگر در هر معامله ۱٪ حساب را ریسک
+    کنید، ۳R+ یعنی ۳٪ رشد حساب. این واحد مستقل از حجم پوزیشن و اندازه حساب است، پس
+    مقایسه تنظیمات مختلف با آن دقیق‌تر و منصفانه‌تر است.</p>
+  </div>
+
+  <div class="note warn">
+    <b>محدودیت مهم داشبورد</b>
+    <p>آمار داشبورد فقط بر اساس کندل‌های <strong>بارگذاری‌شده روی چارت</strong> است.
+    تریدینگ‌ویو در پلن‌های پایین‌تر تعداد کندل محدودی می‌دهد، پس این آمار جایگزین یک
+    بک‌تست کامل نیست. برای بک‌تست دقیق‌تر از بک‌تستر پایتون همین پروژه استفاده کنید.</p>
+  </div>
+
+  <span class="page-num">۱۳</span><span class="page-tag">راهنمای اندیکاتور SP2L</span>
+</section>
+
+<!-- =========================================================== 11 -->
+<section class="page">
+  <h2><span class="n">۱۱</span>آلارم‌ها</h2>
+
+  <p>اندیکاتور پنج رویداد قابل هشدار دارد. برای ساختن آلارم:</p>
+  <ol class="steps">
+    <li>روی چارت راست‌کلیک کنید و <strong>Add alert</strong> را بزنید (یا کلید <span dir="ltr">Alt+A</span>).</li>
+    <li>در قسمت <strong>Condition</strong>، اندیکاتور <strong>SP2L</strong> را انتخاب کنید.</li>
+    <li>از فهرست کشویی، رویداد موردنظر را انتخاب کنید (جدول زیر).</li>
+    <li>در تب <strong>Notifications</strong> روش اطلاع‌رسانی (اپلیکیشن موبایل، ایمیل، پاپ‌آپ) را انتخاب کنید.</li>
+    <li><strong>Create</strong> را بزنید.</li>
+  </ol>
+
+  <table>
+    <thead><tr><th style="width:34%">نام آلارم</th><th>چه زمانی فعال می‌شود</th></tr></thead>
+    <tbody>
+      <tr><td><code>SP2L Long</code></td><td>سیگنال خرید صادر شد</td></tr>
+      <tr><td><code>SP2L Short</code></td><td>سیگنال فروش صادر شد</td></tr>
+      <tr><td><code>SP2L Any signal</code></td><td>هر سیگنالی (خرید یا فروش)</td></tr>
+      <tr><td><code>SP2L Partial filled</code></td><td>پارشال گرفته شد</td></tr>
+      <tr><td><code>SP2L Trade closed</code></td><td>یک معامله بسته شد (نتیجه روی چارت است)</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note warn">
+    <b>نکته مهم درباره زمان‌بندی آلارم</b>
+    <p>چون تصمیم‌ها روی کندل بسته‌شده گرفته می‌شوند، آلارم هم در لحظه بسته شدن کندل
+    فعال می‌شود. در تنظیمات آلارم گزینه <strong>Once Per Bar Close</strong> را انتخاب
+    کنید تا هشدارهای تکراری یا زودهنگام نگیرید.</p>
+  </div>
+
+  <div class="note">
+    <b>در حالت لیمیت</b>
+    <p>آلارم سیگنال، لحظه <strong>کاشتن</strong> سفارش لیمیت را اعلام می‌کند، نه لحظه
+    پر شدن آن. پس بعد از دریافت آلارم باید سفارش را بگذارید و منتظر بمانید — ممکن است
+    اصلاً پر نشود.</p>
+  </div>
+
+  <span class="page-num">۱۴</span><span class="page-tag">راهنمای اندیکاتور SP2L</span>
+</section>
+
+<!-- =========================================================== 12 -->
+<section class="page">
+  <h2><span class="n">۱۲</span>اندیکاتور Pro BTB</h2>
+
+  <p>استراتژی دوم پورصمدی، <strong>Pro BTB</strong> (مخفف Professional Back To
+  Breakeven)، روی همان زیربنای اسپایک ساخته شده ولی تاکتیک ورودش متفاوت است.</p>
+
+  <div class="note ok">
+    <b>منطق Pro BTB</b>
+    <p>شکست یک سطح کلیدی ← <strong>برگشت قیمت به همان سطح شکسته‌شده</strong> ← ادامه
+    روند اصلی. ورود دقیقاً روی ریتست سطح انجام می‌شود.</p>
+  </div>
+
+  <h3>تفاوت دو استراتژی</h3>
+  <table>
+    <thead><tr><th style="width:26%">ویژگی</th><th style="width:37%">SP2L</th><th style="width:37%">Pro BTB</th></tr></thead>
+    <tbody>
+      <tr><td>نوع ورود</td><td>مومنتوم — شکست سطح B</td><td>ریتست — برگشت به سطح شکسته‌شده L</td></tr>
+      <tr><td>کِی جواب می‌دهد</td><td>پولبک کم‌عمق، بازار پرشتاب</td><td>پولبک عمیق تا خود سطح</td></tr>
+      <tr><td>قیمت ورود</td><td>بدتر، ولی با تأیید ادامه</td><td>بهتر، ولی با ریسک عدم برگشت</td></tr>
+      <tr><td>R:R پیش‌فرض</td><td>۱:۱</td><td>۲:۱</td></tr>
+    </tbody>
+  </table>
+
+  <p>این دو <strong>مکمل</strong> یکدیگرند: اگر هر دو اندیکاتور را روی چارت داشته باشید،
+  هم حرکت‌های پرشتاب (SP2L) و هم اصلاح‌های عمیق (BTB) را پوشش می‌دهید.</p>
+
+  <h3>پارامترهای اختصاصی BTB</h3>
+  <table>
+    <thead><tr><th style="width:38%">پارامتر</th><th style="width:14%" class="center">پیش‌فرض</th><th>توضیح</th></tr></thead>
+    <tbody>
+      <tr><td><code>Level lookback</code></td><td class="center">۱۰</td><td>پنجره یافتن سطح شکسته‌شده پیش از اسپایک</td></tr>
+      <tr><td><code>Final target (R:R)</code></td><td class="center">۲٫۰</td><td>حد سود بر حسب برابر ریسک</td></tr>
+      <tr><td><code>Max bars to wait for retest</code></td><td class="center">۳۰</td><td>مهلت برگشت قیمت به سطح</td></tr>
+    </tbody>
+  </table>
+
+  <h3>لیبل‌های اختصاصی BTB</h3>
+  <table>
+    <thead><tr><th style="width:34%">لیبل</th><th>معنی</th></tr></thead>
+    <tbody>
+      <tr><td><strong>✖ Expired</strong></td><td>قیمت در مهلت مقرر به سطح برنگشت</td></tr>
+      <tr><td><strong>✖ Gapped through</strong></td><td>کندل با گپ از روی حد ضرر باز شد؛ فرض می‌شود لیمیت پر نشده و ستاپ باطل است</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note warn">
+    <b>هشدار صادقانه درباره BTB</b>
+    <p>جزئیات کامل Pro BTB (از جمله «شش سناریوی ورود») فقط در دوره رسمی پورصمدی ارائه
+    شده و منابع عمومی صرفاً منطق هسته‌ای را مستند کرده‌اند. پیاده‌سازی ما بر همان منطق
+    هسته‌ای بنا شده و فرض‌های اضافه‌شده در سند
+    <span dir="ltr">docs/BTB_BLUEPRINT.md</span> با برچسب <strong>[فرض]</strong> مشخص
+    شده‌اند. آن سند را حتماً بخوانید.</p>
+  </div>
+
+  <span class="page-num">۱۵</span><span class="page-tag">راهنمای اندیکاتور SP2L</span>
+</section>
+
+<!-- =========================================================== 13 -->
+<section class="page">
+  <h2><span class="n">۱۳</span>گردش‌کار پیشنهادی و Bar Replay</h2>
+
+  <h3>گام‌به‌گام از نصب تا معامله</h3>
+  <ol class="steps">
+    <li><strong>نصب و مشاهده:</strong> اندیکاتور را با تنظیمات پیش‌فرض روی نماد و تایم‌فریم هدف بگذارید و چند روز فقط <strong>تماشا</strong> کنید — بدون معامله.</li>
+    <li><strong>تنظیم تشخیص:</strong> اگر ستاپ‌ها خیلی کم یا خیلی زیادند، پارامترهای بخش ۶ را تنظیم کنید.</li>
+    <li><strong>انتخاب آپشن ورود:</strong> هر چهار آپشن را روی همان بازه زمانی امتحان و داشبورد را مقایسه کنید.</li>
+    <li><strong>افزودن هزینه واقعی:</strong> <code>Cost per trade</code> را با اسپرد واقعی بروکرتان تنظیم کنید. آمار داشبورد را دوباره ببینید.</li>
+    <li><strong>فعال‌سازی گاردها:</strong> سقف ضرر و تعداد معامله روزانه را بگذارید.</li>
+    <li><strong>بک‌تست عمیق:</strong> با بک‌تستر پایتون پروژه روی دیتای بلندمدت تست بگیرید.</li>
+    <li><strong>حساب دمو:</strong> حداقل یک ماه با آلارم‌ها روی دمو معامله کنید.</li>
+    <li><strong>حساب واقعی:</strong> فقط بعد از نتایج قابل‌قبول دمو، با کمترین حجم ممکن.</li>
+  </ol>
+
+  <h3>استفاده از Bar Replay</h3>
+  <p>ابزار <strong>Bar Replay</strong> تریدینگ‌ویو بهترین راه برای تمرین است: چارت را به
+  عقب برمی‌گرداند و کندل‌به‌کندل جلو می‌برد، انگار بازار زنده است.</p>
+
+  <ol class="steps">
+    <li>در نوار ابزار بالای چارت، آیکن <strong>Replay</strong> را بزنید.</li>
+    <li>روی نقطه‌ای از گذشته چارت کلیک کنید تا نقطه شروع مشخص شود.</li>
+    <li>با دکمه Play یا کلید فلش، کندل‌ها را جلو ببرید.</li>
+  </ol>
+
+  <div class="note ok">
+    <b>اندیکاتور با ریپلی سازگار است</b>
+    <p>ستاپ‌ها، سفارش‌های در انتظار و معاملات دقیقاً بار به بار جلو می‌روند و داشبورد
+    هم به‌روز می‌شود — پس می‌توانید بدون ریسک، تصمیم‌گیری در لحظه را تمرین کنید.</p>
+  </div>
+
+  <div class="note">
+    <b>تمرین پیشنهادی</b>
+    <p>در حالت ریپلی، پیش از رسیدن به کندل شکست، خودتان حدس بزنید ستاپ فعال می‌شود یا
+    باطل. بعد یک کندل جلو بروید و ببینید اندیکاتور چه گفت. این تمرین سریع‌ترین راه
+    یادگیری منطق استراتژی است.</p>
+  </div>
+
+  <span class="page-num">۱۶</span><span class="page-tag">راهنمای اندیکاتور SP2L</span>
+</section>
+
+<!-- =========================================================== 14 -->
+<section class="page">
+  <h2><span class="n">۱۴</span>عیب‌یابی و پرسش‌های رایج</h2>
+
+  <h3>هیچ ستاپی پیدا نمی‌شود</h3>
+  <ul>
+    <li>تایم‌فریم را پایین‌تر بیاورید (M5 یا M1)؛</li>
+    <li><code>Movement power</code> را کم کنید یا صفر بگذارید؛</li>
+    <li><code>Require P-Gap</code> را خاموش کنید؛</li>
+    <li><code>Min body/range ratio</code> را کم کنید (مثلاً ۰٫۴)؛</li>
+    <li>مطمئن شوید <code>Session filter</code> ناخواسته روشن نیست.</li>
+  </ul>
+
+  <h3>ستاپ می‌بینم ولی معامله باز نمی‌شود</h3>
+  <p>به لیبل کنار ستاپ نگاه کنید — دلیل همیشه آنجا نوشته شده است:
+  <strong>Not activated</strong> (لیمیت پر نشد)، <strong>Skipped</strong> (معامله باز
+  بود)، <strong>Off-session</strong> یا <strong>Daily limit</strong>.</p>
+
+  <h3>رسم‌ها ناقص‌اند یا قدیمی‌ها ناپدید شده‌اند</h3>
+  <p>به سقف ۵۰۰ آبجکت Pine خورده‌اید. گروه <strong>History</strong> را روشن کنید و
+  تعداد روز را کم بگذارید (مثلاً ۵ روز).</p>
+
+  <h3>خطای کامپایل هنگام Add to chart</h3>
+  <p>مطمئن شوید کد را <strong>کامل</strong> کپی کرده‌اید (از خط <code>//@version=5</code>
+  تا آخرین خط) و کد قبلی ویرایشگر را کامل پاک کرده‌اید. اگر باز خطا داد، متن دقیق خطا
+  و شماره خط را یادداشت کنید.</p>
+
+  <h3>نتایج داشبورد با معاملات واقعی من فرق دارد</h3>
+  <p>طبیعی است. اندیکاتور با فرض‌های محافظه‌کارانه شبیه‌سازی می‌کند:</p>
+  <ul>
+    <li>وقتی حد ضرر و حد سود در یک کندل هر دو لمس شوند، <strong>حد ضرر</strong> فرض می‌شود؛</li>
+    <li>اسپرد، لغزش و کمیسیون واقعی لحاظ نمی‌شوند (مگر با <code>Cost per trade</code>)؛</li>
+    <li>پر شدن سفارش لیمیت در دنیای واقعی تضمینی نیست حتی اگر قیمت سطح را لمس کند.</li>
+  </ul>
+
+  <h3>چرا گاهی سیگنال دیرتر از انتظارم می‌آید؟</h3>
+  <p>چون اندیکاتور روی کندل <strong>بسته‌شده</strong> تصمیم می‌گیرد و ورود مارکت را روی
+  اوپن کندل بعدی می‌گذارد. این عمدی است و از سیگنال‌های «رنگ‌عوض‌کن» (repainting)
+  جلوگیری می‌کند.</p>
+
+  <div class="note danger" style="margin-top:8mm">
+    <b>سلب مسئولیت</b>
+    <p>این ابزار برای مقاصد آموزشی و پژوهشی ساخته شده و توصیه سرمایه‌گذاری نیست.
+    معامله در بازارهای اهرم‌دار ریسک از دست دادن کل سرمایه را دارد. عملکرد گذشته
+    هیچ تضمینی برای آینده نیست. مسئولیت هر تصمیم معاملاتی کاملاً بر عهده خود شماست.</p>
+  </div>
+
+  <span class="page-num">۱۷</span><span class="page-tag">راهنمای اندیکاتور SP2L</span>
+</section>
+
+</body>
+</html>

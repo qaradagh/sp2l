@@ -6,6 +6,10 @@
 
 **📘 بلوپرینت‌ها:** [SP2L](docs/BLUEPRINT.md) · [Pro BTB](docs/BTB_BLUEPRINT.md)
 
+**📕 راهنمای کامل کاربری (PDF فارسی):**
+[اندیکاتورهای تریدینگ‌ویو](docs/guide_tradingview.pdf) ·
+[اکسپرت متاتریدر ۵](docs/guide_mt5.pdf)
+
 ## منطق در یک نگاه
 
 ```
@@ -22,6 +26,9 @@
 ```
 docs/BLUEPRINT.md        بلوپرینت SP2L (فارسی) + منابع
 docs/BTB_BLUEPRINT.md    بلوپرینت Pro BTB + فرض‌های پیاده‌سازی + قواعد حالت ترکیبی
+docs/guide_tradingview.pdf  راهنمای کامل اندیکاتورها (فارسی، ۱۷ صفحه)
+docs/guide_mt5.pdf       راهنمای کامل اکسپرت متاتریدر ۵ (فارسی، ۱۷ صفحه)
+docs/build_pdf.py        اسکریپت تولید دوباره PDF از فایل‌های HTML
 sp2l/models.py           مدل‌های داده (کندل، کانفیگ، ستاپ، معامله)
 sp2l/strategy.py         موتور مشترک تشخیص اسپایک + ماشین حالت SP2L
 sp2l/btb.py              ماشین حالت Pro BTB (سطح شکسته‌شده → ریتست → ورود لیمیت)
